@@ -8,7 +8,6 @@ import (
 
 	"tinygo.org/x/drivers/dht"
 	"tinygo.org/x/drivers/ssd1306"
-	"tinygo.org/x/tinyfont"
 )
 
 // pixelColor is the color we use when drawing things. We use a 1-bit display,
@@ -73,9 +72,10 @@ func main() {
 		// really short and aligned to the right hand side side of the screen.
 		// (By teh way, the DHT11 will never get to 100% humidity, but we may
 		// get there when upgrading to a DHT22.)
-		tinyfont.WriteLine(&display, &tinyfont.TomThumb, 84, 40, "Debug text!", pixelColor)
-		tinyfont.WriteLine(&display, &tinyfont.TomThumb, 84, 48, "More debug...", pixelColor)
-		tinyfont.WriteLine(&display, &tinyfont.TomThumb, 84, 56, "n' then some.", pixelColor)
+		//
+		// tinyfont.WriteLine(&display, &tinyfont.TomThumb, 84, 40, "Debug text!", pixelColor)
+		// tinyfont.WriteLine(&display, &tinyfont.TomThumb, 84, 48, "More debug...", pixelColor)
+		// tinyfont.WriteLine(&display, &tinyfont.TomThumb, 84, 56, "n' then some.", pixelColor)
 
 		display.Display()
 	}
