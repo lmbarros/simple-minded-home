@@ -64,10 +64,15 @@ func main() {
 		textHumidity := fmt.Sprintf("💧%.0f%%", humidity)
 
 		display.ClearBuffer()
-		printToDisplay(display, textTemperature, 0, 0)
-		printToDisplay(display, textHumidity, 0, 32)
+		displayText(display, textTemperature, 0, 0)
+		displayText(display, textHumidity, 0, 32)
 
-		// Dummy debugging
+		// This is an area of the screen that is generally empty, and therefore
+		// usable for printing small error messages. If the air humidity gets to
+		// 100%, there will be some overlap, so ideally debug messages should be
+		// really short and aligned to the right hand side side of the screen.
+		// (By teh way, the DHT11 will never get to 100% humidity, but we may
+		// get there when upgrading to a DHT22.)
 		tinyfont.WriteLine(&display, &tinyfont.TomThumb, 84, 40, "Debug text!", pixelColor)
 		tinyfont.WriteLine(&display, &tinyfont.TomThumb, 84, 48, "More debug...", pixelColor)
 		tinyfont.WriteLine(&display, &tinyfont.TomThumb, 84, 56, "n' then some.", pixelColor)
@@ -76,7 +81,7 @@ func main() {
 	}
 }
 
-func printToDisplay(display ssd1306.Device, text string, x, y int16) {
+func displayText(display ssd1306.Device, text string, x, y int16) {
 	for _, r := range text {
 		if img, ok := runeToImage[r]; ok {
 			display.DrawBitmap(x, y, img)

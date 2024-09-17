@@ -6,7 +6,15 @@ Collection of projects I am using to add some slightly-dim brains to my home.
 
 ## Notes to self
 
-Some references I want to keep around:
+### TODO
+
+* Temperature & Humidity sensor
+    * Button to turn the display off and on.
+    * Consider updating only every minute, or maybe 5 minutes.
+    * Check if I can get to some low-power state in between updates.
+    * Send data somewhere.
+
+### Reference
 
 * `sudo ~/bin/tinygo/bin/tinygo flash -target=pico -stack-size=8kb -monitor ./examples/blinky`
 
