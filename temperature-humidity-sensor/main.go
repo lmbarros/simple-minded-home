@@ -60,16 +60,17 @@ func main() {
 			fmt.Printf("Error reading humidity: %v", err)
 		}
 
-		fmt.Printf("Temperature: %.1f°C\nHumidity: %.1f%%\n\n", temperature, humidity)
+		textTemperature := fmt.Sprintf("🌡️%.1f°C", temperature)
+		textHumidity := fmt.Sprintf("💧%.0f%%", humidity)
 
 		display.ClearBuffer()
-		textHumidity := fmt.Sprintf("💧%.0f%%", humidity)
-		textTemperature := fmt.Sprintf("🌡️%.1f°C", temperature)
-		printToDisplay(display, textHumidity, 4, 4)
-		printToDisplay(display, textTemperature, 4, 34)
+		printToDisplay(display, textTemperature, 0, 0)
+		printToDisplay(display, textHumidity, 0, 32)
 
 		// Dummy debugging
-		tinyfont.WriteLine(&display, &tinyfont.TomThumb, 0, 63, "This is a fake debug text!", pixelColor)
+		tinyfont.WriteLine(&display, &tinyfont.TomThumb, 84, 40, "Debug text!", pixelColor)
+		tinyfont.WriteLine(&display, &tinyfont.TomThumb, 84, 48, "More debug...", pixelColor)
+		tinyfont.WriteLine(&display, &tinyfont.TomThumb, 84, 56, "n' then some.", pixelColor)
 
 		display.Display()
 	}
