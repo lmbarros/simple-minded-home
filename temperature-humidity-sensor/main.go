@@ -4,12 +4,16 @@ import (
 	"fmt"
 	"image/color"
 	"machine"
-	"math/rand"
 	"time"
 
 	"tinygo.org/x/drivers/dht"
 	"tinygo.org/x/drivers/ssd1306"
+	"tinygo.org/x/tinyfont"
 )
+
+// pixelColor is the color we use when drawing things. We use a 1-bit display,
+// so using an RGBA color here is merely a requirement from the interfaces used.
+var pixelColor = color.RGBA{255, 255, 255, 255}
 
 func main() {
 	led := machine.LED
@@ -59,14 +63,24 @@ func main() {
 		fmt.Printf("Temperature: %.1f°C\nHumidity: %.1f%%\n\n", temperature, humidity)
 
 		display.ClearBuffer()
-		for x := int16(0); x < 128; x++ {
-			for y := int16(0); y < 64; y++ {
-				p := (float32(x) / 128) * (float32(y) / 64)
-				if p < rand.Float32() {
-					display.SetPixel(x, y, color.RGBA{255, 255, 255, 255})
-				}
-			}
-		}
+		textHumidity := fmt.Sprintf("💧%.0f%%", humidity)
+		textTemperature := fmt.Sprintf("🌡️%.1f°C", temperature)
+		printToDisplay(display, textHumidity, 4, 4)
+		printToDisplay(display, textTemperature, 4, 34)
+
+		// Dummy debugging
+		tinyfont.WriteLine(&display, &tinyfont.TomThumb, 0, 63, "This is a fake debug text!", pixelColor)
+
 		display.Display()
+	}
+}
+
+func printToDisplay(display ssd1306.Device, text string, x, y int16) {
+	for _, r := range text {
+		if img, ok := runeToImage[r]; ok {
+			display.DrawBitmap(x, y, img)
+			w, _ := img.Size()
+			x += int16(w)
+		}
 	}
 }
