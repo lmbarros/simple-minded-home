@@ -15,9 +15,6 @@ import (
 var pixelColor = color.RGBA{255, 255, 255, 255}
 
 func main() {
-	led := machine.LED
-	led.Configure(machine.PinConfig{Mode: machine.PinOutput})
-
 	dht11 := dht.New(machine.GPIO15, dht.DHT11)
 
 	displayI2C := machine.I2C0
@@ -41,14 +38,8 @@ func main() {
 	display.ClearDisplay()
 
 	for {
-		// Blink LED
-		led.High()
-		time.Sleep(time.Second / 3)
+		time.Sleep(5 * time.Second)
 
-		led.Low()
-		time.Sleep(time.Second * 2)
-
-		// Read sensor
 		temperature, err := dht11.TemperatureFloat(dht.C)
 		if err != nil {
 			fmt.Printf("Error reading temperature: %v", err)
