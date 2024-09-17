@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image/color"
 	"machine"
+	"os"
 	"time"
 
 	"tinygo.org/x/drivers/dht"
@@ -24,7 +25,7 @@ func main() {
 		Frequency: 400 * machine.KHz,
 	})
 	if err != nil {
-		println("could not configure I2C:", err)
+		fmt.Fprintf(os.Stderr, "Configuring I2C:", err)
 		return
 	}
 
@@ -42,12 +43,12 @@ func main() {
 
 		temperature, err := dht11.TemperatureFloat(dht.C)
 		if err != nil {
-			fmt.Printf("Error reading temperature: %v", err)
+			fmt.Fprintf(os.Stderr, "Reading temperature: %v\n", err)
 		}
 
 		humidity, err := dht11.HumidityFloat()
 		if err != nil {
-			fmt.Printf("Error reading humidity: %v", err)
+			fmt.Fprintf(os.Stderr, "Reading humidity: %v\n", err)
 		}
 
 		textTemperature := fmt.Sprintf("🌡️%.1f°C", temperature)
@@ -75,7 +76,10 @@ func main() {
 func displayText(display ssd1306.Device, text string, x, y int16) {
 	for _, r := range text {
 		if img, ok := runeToImage[r]; ok {
-			display.DrawBitmap(x, y, img)
+			err := display.DrawBitmap(x, y, img)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Displaying a character: %v", err)
+			}
 			w, _ := img.Size()
 			x += int16(w)
 		}
