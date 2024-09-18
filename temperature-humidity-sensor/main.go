@@ -16,6 +16,10 @@ import (
 var pixelColor = color.RGBA{255, 255, 255, 255}
 
 func main() {
+	borrowedNetMain()
+
+	setupNetworking()
+
 	dht11 := dht.New(machine.GPIO15, dht.DHT11)
 
 	displayI2C := machine.I2C0
@@ -84,4 +88,25 @@ func displayText(display ssd1306.Device, text string, x, y int16) {
 			x += int16(w)
 		}
 	}
+}
+
+func setupNetworking() {
+	/***
+	_, stack, _, err := SetupWithDHCP(SetupConfig{
+		Hostname: "why-does-it-matter",
+		// Logger:   logger,
+		TCPPorts: 1, // For HTTP over TCP.
+		UDPPorts: 1, // For DNS.
+	})
+
+	if err != nil {
+		panic("setup DHCP:" + err.Error())
+	}
+
+	start := time.Now()
+	svAddr, err := netip.ParseAddrPort(serverAddrStr)
+	if err != nil {
+		panic("parsing server address:" + err.Error())
+	}
+	***/
 }
