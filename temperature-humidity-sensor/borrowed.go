@@ -24,7 +24,8 @@ const tcpbufsize = 2030 // MTU - ethhdr - iphdr - tcphdr
 // Set this address to the server's address.
 // You can run the server example in this same directory to test this client.
 // const serverAddrStr = "192.168.0.44:8080"
-const serverAddrStr = "85.31.231.84:80" // pudim.com.br
+// const serverAddrStr = "85.31.231.84:80" // pudim.com.br
+const serverAddrStr = "93.184.215.14:80" // example.com
 
 const ourHostname = "tinygo-http-client"
 
@@ -363,10 +364,12 @@ func borrowedNetMain() {
 		panic("parsing server address:" + err.Error())
 	}
 	// Resolver router's hardware address to dial outside our network to internet.
-	routerhw, err := ResolveHardwareAddr(stack, svAddr.Addr())
-	if err != nil {
-		panic("router hwaddr resolving:" + err.Error())
-	}
+	// routerhw, err := ResolveHardwareAddr(stack, svAddr.Addr())
+	// if err != nil {
+	// 	panic("router hwaddr resolving:" + err.Error())
+	// }
+	// TODO: Hardcoding the MAC address of my router!
+	routerhw := [6]byte{0x70, 0xfd, 0x45, 0xc0, 0x1e, 0x17}
 
 	rng := rand.New(rand.NewSource(uint64(time.Now().Sub(start))))
 	// Start TCP server.
@@ -397,13 +400,15 @@ func borrowedNetMain() {
 	// post data to reqbytes: `postReq := append(reqbytes, postData...)` and send postReq over TCP.
 	req.SetMethod("GET")
 	req.SetHost(svAddr.Addr().String())
+	req.SetHost("example.com")
+	// req.SetHost("pudim.com.br")
 	reqbytes := req.Header()
 
 	logger.Info("tcp:ready",
 		slog.String("clientaddr", clientAddr.String()),
 		slog.String("serveraddr", serverAddrStr),
 	)
-	rxBuf := make([]byte, 4096)
+	rxBuf := make([]byte, 1024*10)
 	for {
 		time.Sleep(5 * time.Second)
 		slog.Info("dialing", slog.String("serveraddr", serverAddrStr))
@@ -415,11 +420,13 @@ func borrowedNetMain() {
 			closeConn("opening TCP: " + err.Error())
 			continue
 		}
+		slog.Info("LMB: Opened connection!")
 		retries := 50
 		for conn.State() != seqs.StateEstablished && retries > 0 {
 			time.Sleep(100 * time.Millisecond)
 			retries--
 		}
+		slog.Info("LMB: Disabling deadline!")
 		conn.SetDeadline(time.Time{}) // Disable the deadline.
 		if retries == 0 {
 			closeConn("tcp establish retry limit exceeded")
@@ -427,13 +434,16 @@ func borrowedNetMain() {
 		}
 
 		// Send the request.
+		slog.Info("LMB: Sending the request!")
 		_, err = conn.Write(reqbytes)
 		if err != nil {
 			closeConn("writing request: " + err.Error())
 			continue
 		}
+		slog.Info("LMB: Sleep 1111111!")
 		time.Sleep(500 * time.Millisecond)
 		conn.SetDeadline(time.Now().Add(connTimeout))
+		slog.Info("LMB: Reading response")
 		n, err := conn.Read(rxBuf)
 		if n == 0 && err != nil {
 			closeConn("reading response: " + err.Error())
