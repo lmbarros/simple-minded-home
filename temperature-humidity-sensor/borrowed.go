@@ -3,24 +3,17 @@ package main
 
 import (
 	"errors"
-	"io"
 	"log/slog"
-	"machine"
-	"net"
 	"net/netip"
 	"time"
 
 	"github.com/soypat/cyw43439"
-	"github.com/soypat/seqs"
-	"github.com/soypat/seqs/eth/dhcp"
 	"github.com/soypat/seqs/eth/dns"
-	"github.com/soypat/seqs/httpx"
 	"github.com/soypat/seqs/stacks"
-	"golang.org/x/exp/rand"
 )
 
 const connTimeout = 5 * time.Second
-const tcpbufsize = 2030 // MTU - ethhdr - iphdr - tcphdr
+const tcpBufSize = 2030 // MTU - ethhdr - iphdr - tcphdr
 // Set this address to the server's address.
 // You can run the server example in this same directory to test this client.
 // const serverAddrStr = "192.168.0.44:8080"
@@ -43,140 +36,113 @@ type SetupConfig struct {
 	TCPPorts uint16
 }
 
-func SetupWithDHCP(cfg SetupConfig) (*stacks.DHCPClient, *stacks.PortStack, *cyw43439.Device, error) {
-	cfg.UDPPorts++ // Add extra UDP port for DHCP client.
-	logger := cfg.Logger
-	if logger == nil {
-		logger = slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{
-			Level: slog.Level(127), // Make temporary logger that does no logging.
-		}))
-	}
-	var err error
-	var reqAddr netip.Addr
-	if cfg.RequestedIP != "" {
-		reqAddr, err = netip.ParseAddr(cfg.RequestedIP)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-	}
+// func SetupWithDHCP(cfg SetupConfig) (*stacks.DHCPClient, *stacks.PortStack, *cyw43439.Device, error) {
+// 	cfg.UDPPorts++ // Add extra UDP port for DHCP client.
+// 	logger := cfg.Logger
+// 	if logger == nil {
+// 		logger = slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{
+// 			Level: slog.Level(127), // Make temporary logger that does no logging.
+// 		}))
+// 	}
+// 	var err error
+// 	var reqAddr netip.Addr
+// 	if cfg.RequestedIP != "" {
+// 		reqAddr, err = netip.ParseAddr(cfg.RequestedIP)
+// 		if err != nil {
+// 			return nil, nil, nil, err
+// 		}
+// 	}
 
-	dev := cyw43439.NewPicoWDevice()
-	// dev := cyw43439.New()
-	wificfg := cyw43439.DefaultWifiConfig()
-	wificfg.Logger = logger
-	// cfg.Logger = logger // Uncomment to see in depth info on wifi device functioning.
-	logger.Info("initializing pico W device...")
-	devInitTime := time.Now()
+// 	dev := cyw43439.NewPicoWDevice()
+// 	// dev := cyw43439.New()
+// 	wificfg := cyw43439.DefaultWifiConfig()
+// 	wificfg.Logger = logger
+// 	// cfg.Logger = logger // Uncomment to see in depth info on wifi device functioning.
+// 	logger.Info("initializing pico W device...")
+// 	devInitTime := time.Now()
 
-	err = dev.Init(wificfg)
-	if err != nil {
-		return nil, nil, nil, errors.New("wifi init failed:" + err.Error())
-	}
-	logger.Info("cyw43439:Init", slog.Duration("duration", time.Since(devInitTime)))
-	if len(pass) == 0 {
-		logger.Info("joining open network:", slog.String("ssid", ssid))
-	} else {
-		logger.Info("joining WPA secure network", slog.String("ssid", ssid), slog.Int("passlen", len(pass)))
-	}
-	for {
-		// Set ssid/pass in secrets.go
-		err = dev.JoinWPA2(ssid, pass)
-		if err == nil {
-			break
-		}
-		logger.Error("wifi join faled", slog.String("err", err.Error()))
-		time.Sleep(5 * time.Second)
-	}
-	mac, _ := dev.HardwareAddr6()
-	logger.Info("wifi join success!", slog.String("mac", net.HardwareAddr(mac[:]).String()))
+// 	err = dev.Init(wificfg)
+// 	if err != nil {
+// 		return nil, nil, nil, errors.New("wifi init failed:" + err.Error())
+// 	}
+// 	logger.Info("cyw43439:Init", slog.Duration("duration", time.Since(devInitTime)))
+// 	if len(pass) == 0 {
+// 		logger.Info("joining open network:", slog.String("ssid", ssid))
+// 	} else {
+// 		logger.Info("joining WPA secure network", slog.String("ssid", ssid), slog.Int("passlen", len(pass)))
+// 	}
+// 	for {
+// 		// Set ssid/pass in secrets.go
+// 		err = dev.JoinWPA2(ssid, pass)
+// 		if err == nil {
+// 			break
+// 		}
+// 		logger.Error("wifi join faled", slog.String("err", err.Error()))
+// 		time.Sleep(5 * time.Second)
+// 	}
+// 	mac, _ := dev.HardwareAddr6()
+// 	logger.Info("wifi join success!", slog.String("mac", net.HardwareAddr(mac[:]).String()))
 
-	stack := stacks.NewPortStack(stacks.PortStackConfig{
-		MAC:             mac,
-		MaxOpenPortsUDP: int(cfg.UDPPorts),
-		MaxOpenPortsTCP: int(cfg.TCPPorts),
-		MTU:             mtu,
-		Logger:          logger,
-	})
+// 	stack := stacks.NewPortStack(stacks.PortStackConfig{
+// 		MAC:             mac,
+// 		MaxOpenPortsUDP: int(cfg.UDPPorts),
+// 		MaxOpenPortsTCP: int(cfg.TCPPorts),
+// 		MTU:             mtu,
+// 		Logger:          logger,
+// 	})
 
-	dev.RecvEthHandle(stack.RecvEth)
+// 	dev.RecvEthHandle(stack.RecvEth)
 
-	// Begin asynchronous packet handling.
-	go nicLoop(dev, stack)
+// 	// Begin asynchronous packet handling.
+// 	go nicLoop(dev, stack)
 
-	// Perform DHCP request.
-	dhcpClient := stacks.NewDHCPClient(stack, dhcp.DefaultClientPort)
-	err = dhcpClient.BeginRequest(stacks.DHCPRequestConfig{
-		RequestedAddr: reqAddr,
-		Xid:           uint32(time.Now().Nanosecond()),
-		Hostname:      cfg.Hostname,
-	})
-	if err != nil {
-		return nil, stack, dev, errors.New("dhcp begin request:" + err.Error())
-	}
-	i := 0
-	for dhcpClient.State() != dhcp.StateBound {
-		i++
-		logger.Info("DHCP ongoing...")
-		time.Sleep(time.Second / 2)
-		if i > 15 {
-			if !reqAddr.IsValid() {
-				return dhcpClient, stack, dev, errors.New("DHCP did not complete and no static IP was requested")
-			}
-			logger.Info("DHCP did not complete, assigning static IP", slog.String("ip", cfg.RequestedIP))
-			stack.SetAddr(reqAddr)
-			return dhcpClient, stack, dev, nil
-		}
-	}
-	var primaryDNS netip.Addr
-	dnsServers := dhcpClient.DNSServers()
-	if len(dnsServers) > 0 {
-		primaryDNS = dnsServers[0]
-	}
-	ip := dhcpClient.Offer()
-	logger.Info("DHCP complete",
-		slog.Uint64("cidrbits", uint64(dhcpClient.CIDRBits())),
-		slog.String("ourIP", ip.String()),
-		slog.String("dns", primaryDNS.String()),
-		slog.String("broadcast", dhcpClient.BroadcastAddr().String()),
-		slog.String("gateway", dhcpClient.Gateway().String()),
-		slog.String("router", dhcpClient.Router().String()),
-		slog.String("dhcp", dhcpClient.DHCPServer().String()),
-		slog.String("hostname", string(dhcpClient.Hostname())),
-		slog.Duration("lease", dhcpClient.IPLeaseTime()),
-		slog.Duration("renewal", dhcpClient.RenewalTime()),
-		slog.Duration("rebinding", dhcpClient.RebindingTime()),
-	)
+// 	// Perform DHCP request.
+// 	dhcpClient := stacks.NewDHCPClient(stack, dhcp.DefaultClientPort)
+// 	err = dhcpClient.BeginRequest(stacks.DHCPRequestConfig{
+// 		RequestedAddr: reqAddr,
+// 		Xid:           uint32(time.Now().Nanosecond()),
+// 		Hostname:      cfg.Hostname,
+// 	})
+// 	if err != nil {
+// 		return nil, stack, dev, errors.New("dhcp begin request:" + err.Error())
+// 	}
+// 	i := 0
+// 	for dhcpClient.State() != dhcp.StateBound {
+// 		i++
+// 		logger.Info("DHCP ongoing...")
+// 		time.Sleep(time.Second / 2)
+// 		if i > 15 {
+// 			if !reqAddr.IsValid() {
+// 				return dhcpClient, stack, dev, errors.New("DHCP did not complete and no static IP was requested")
+// 			}
+// 			logger.Info("DHCP did not complete, assigning static IP", slog.String("ip", cfg.RequestedIP))
+// 			stack.SetAddr(reqAddr)
+// 			return dhcpClient, stack, dev, nil
+// 		}
+// 	}
+// 	var primaryDNS netip.Addr
+// 	dnsServers := dhcpClient.DNSServers()
+// 	if len(dnsServers) > 0 {
+// 		primaryDNS = dnsServers[0]
+// 	}
+// 	ip := dhcpClient.Offer()
+// 	logger.Info("DHCP complete",
+// 		slog.Uint64("cidrbits", uint64(dhcpClient.CIDRBits())),
+// 		slog.String("ourIP", ip.String()),
+// 		slog.String("dns", primaryDNS.String()),
+// 		slog.String("broadcast", dhcpClient.BroadcastAddr().String()),
+// 		slog.String("gateway", dhcpClient.Gateway().String()),
+// 		slog.String("router", dhcpClient.Router().String()),
+// 		slog.String("dhcp", dhcpClient.DHCPServer().String()),
+// 		slog.String("hostname", string(dhcpClient.Hostname())),
+// 		slog.Duration("lease", dhcpClient.IPLeaseTime()),
+// 		slog.Duration("renewal", dhcpClient.RenewalTime()),
+// 		slog.Duration("rebinding", dhcpClient.RebindingTime()),
+// 	)
 
-	stack.SetAddr(ip) // It's important to set the IP address after DHCP completes.
-	return dhcpClient, stack, dev, nil
-}
-
-// ResolveHardwareAddr obtains the hardware address of the given IP address.
-func ResolveHardwareAddr(stack *stacks.PortStack, ip netip.Addr) ([6]byte, error) {
-	if !ip.IsValid() {
-		return [6]byte{}, errors.New("invalid ip")
-	}
-	arpc := stack.ARP()
-	arpc.Abort() // Remove any previous ARP requests.
-	err := arpc.BeginResolve(ip)
-	if err != nil {
-		return [6]byte{}, err
-	}
-	time.Sleep(4 * time.Millisecond)
-	// ARP exchanges should be fast, don't wait too long for them.
-	const timeout = time.Second
-	const maxretries = 20
-	retries := maxretries
-	for !arpc.IsDone() && retries > 0 {
-		retries--
-		if retries == 0 {
-			return [6]byte{}, errors.New("arp timed out")
-		}
-		time.Sleep(timeout / maxretries)
-	}
-	_, hw, err := arpc.ResultAs6()
-	return hw, err
-}
+// 	stack.SetAddr(ip) // It's important to set the IP address after DHCP completes.
+// 	return dhcpClient, stack, dev, nil
+// }
 
 type Resolver struct {
 	stack     *stacks.PortStack
@@ -187,16 +153,16 @@ type Resolver struct {
 }
 
 func NewResolver(stack *stacks.PortStack, dhcp *stacks.DHCPClient) (*Resolver, error) {
-	dnsc := stacks.NewDNSClient(stack, dns.ClientPort)
-	dnsaddrs := dhcp.DNSServers()
-	if len(dnsaddrs) > 0 && !dnsaddrs[0].IsValid() {
+	dnsClient := stacks.NewDNSClient(stack, dns.ClientPort)
+	dnsAddrs := dhcp.DNSServers()
+	if len(dnsAddrs) > 0 && !dnsAddrs[0].IsValid() {
 		return nil, errors.New("dns addr obtained via DHCP not valid")
 	}
 	return &Resolver{
 		stack:   stack,
 		dhcp:    dhcp,
-		dns:     dnsc,
-		dnsaddr: dnsaddrs[0],
+		dns:     dnsClient,
+		dnsaddr: dnsAddrs[0],
 	}, nil
 }
 
@@ -225,11 +191,11 @@ func (r *Resolver) LookupNetIP(host string) ([]netip.Addr, error) {
 		retries--
 		time.Sleep(20 * time.Millisecond)
 	}
-	done, rcode := r.dns.IsDone()
+	done, retCode := r.dns.IsDone()
 	if !done && retries == 0 {
 		return nil, errors.New("dns lookup timed out")
-	} else if rcode != dns.RCodeSuccess {
-		return nil, errors.New("dns lookup failed:" + rcode.String())
+	} else if retCode != dns.RCodeSuccess {
+		return nil, errors.New("dns lookup failed:" + retCode.String())
 	}
 	answers := r.dns.Answers()
 	if len(answers) == 0 {
@@ -249,7 +215,7 @@ func (r *Resolver) LookupNetIP(host string) ([]netip.Addr, error) {
 }
 
 func (r *Resolver) updateDNSHWAddr() (err error) {
-	r.dnshwaddr, err = ResolveHardwareAddr(r.stack, r.dnsaddr)
+	r.dnshwaddr, err = resolveHardwareAddr(r.stack, r.dnsaddr)
 	return err
 }
 
@@ -265,196 +231,5 @@ func (r *Resolver) dnsConfig(name dns.Name) stacks.DNSResolveConfig {
 		DNSAddr:         r.dnsaddr,
 		DNSHWAddr:       r.dnshwaddr,
 		EnableRecursion: true,
-	}
-}
-
-func nicLoop(dev *cyw43439.Device, Stack *stacks.PortStack) {
-	// Maximum number of packets to queue before sending them.
-	const (
-		queueSize                = 3
-		maxRetriesBeforeDropping = 3
-	)
-	var queue [queueSize][mtu]byte
-	var lenBuf [queueSize]int
-	var retries [queueSize]int
-	markSent := func(i int) {
-		queue[i] = [mtu]byte{} // Not really necessary.
-		lenBuf[i] = 0
-		retries[i] = 0
-	}
-	for {
-		stallRx := true
-		// Poll for incoming packets.
-		for i := 0; i < 1; i++ {
-			gotPacket, err := dev.PollOne()
-			if err != nil {
-				println("poll error:", err.Error())
-			}
-			if !gotPacket {
-				break
-			}
-			stallRx = false
-		}
-
-		// Queue packets to be sent.
-		for i := range queue {
-			if retries[i] != 0 {
-				continue // Packet currently queued for retransmission.
-			}
-			var err error
-			buf := queue[i][:]
-			lenBuf[i], err = Stack.HandleEth(buf[:])
-			if err != nil {
-				println("stack error n(should be 0)=", lenBuf[i], "err=", err.Error())
-				lenBuf[i] = 0
-				continue
-			}
-			if lenBuf[i] == 0 {
-				break
-			}
-		}
-		stallTx := lenBuf == [queueSize]int{}
-		if stallTx {
-			if stallRx {
-				// Avoid busy waiting when both Rx and Tx stall.
-				time.Sleep(51 * time.Millisecond)
-			}
-			continue
-		}
-
-		// Send queued packets.
-		for i := range queue {
-			n := lenBuf[i]
-			if n <= 0 {
-				continue
-			}
-			err := dev.SendEth(queue[i][:n])
-			if err != nil {
-				// Queue packet for retransmission.
-				retries[i]++
-				if retries[i] > maxRetriesBeforeDropping {
-					markSent(i)
-					println("dropped outgoing packet:", err.Error())
-				}
-			} else {
-				markSent(i)
-			}
-		}
-	}
-}
-
-func borrowedNetMain() {
-
-	logger := slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	}))
-
-	_, stack, _, err := SetupWithDHCP(SetupConfig{
-		Hostname: ourHostname,
-		Logger:   logger,
-		TCPPorts: 1, // For HTTP over TCP.
-		UDPPorts: 1, // For DNS.
-	})
-	start := time.Now()
-	if err != nil {
-		panic("setup DHCP:" + err.Error())
-	}
-	svAddr, err := netip.ParseAddrPort(serverAddrStr)
-	if err != nil {
-		panic("parsing server address:" + err.Error())
-	}
-	// Resolver router's hardware address to dial outside our network to internet.
-	// routerhw, err := ResolveHardwareAddr(stack, svAddr.Addr())
-	// if err != nil {
-	// 	panic("router hwaddr resolving:" + err.Error())
-	// }
-	// TODO: Hardcoding the MAC address of my router!
-	routerhw := [6]byte{0x70, 0xfd, 0x45, 0xc0, 0x1e, 0x17}
-
-	rng := rand.New(rand.NewSource(uint64(time.Now().Sub(start))))
-	// Start TCP server.
-	clientAddr := netip.AddrPortFrom(stack.Addr(), uint16(rng.Intn(65535-1024)+1024))
-	conn, err := stacks.NewTCPConn(stack, stacks.TCPConnConfig{
-		TxBufSize: tcpbufsize,
-		RxBufSize: tcpbufsize,
-	})
-
-	if err != nil {
-		panic("conn create:" + err.Error())
-	}
-
-	closeConn := func(err string) {
-		slog.Error("tcpconn:closing", slog.String("err", err))
-		conn.Close()
-		for !conn.State().IsClosed() {
-			slog.Info("tcpconn:waiting", slog.String("state", conn.State().String()))
-			time.Sleep(1000 * time.Millisecond)
-		}
-	}
-
-	// Here we create the HTTP request and generate the bytes. The Header method
-	// returns the raw header bytes as should be sent over the wire.
-	var req httpx.RequestHeader
-	req.SetRequestURI("/")
-	// If you need a Post request change "GET" to "POST" and then add the
-	// post data to reqbytes: `postReq := append(reqbytes, postData...)` and send postReq over TCP.
-	req.SetMethod("GET")
-	req.SetHost(svAddr.Addr().String())
-	req.SetHost("example.com")
-	// req.SetHost("pudim.com.br")
-	reqbytes := req.Header()
-
-	logger.Info("tcp:ready",
-		slog.String("clientaddr", clientAddr.String()),
-		slog.String("serveraddr", serverAddrStr),
-	)
-	rxBuf := make([]byte, 1024*10)
-	for {
-		time.Sleep(5 * time.Second)
-		slog.Info("dialing", slog.String("serveraddr", serverAddrStr))
-
-		// Make sure to timeout the connection if it takes too long.
-		conn.SetDeadline(time.Now().Add(connTimeout))
-		err = conn.OpenDialTCP(clientAddr.Port(), routerhw, svAddr, seqs.Value(rng.Intn(65535-1024)+1024))
-		if err != nil {
-			closeConn("opening TCP: " + err.Error())
-			continue
-		}
-		slog.Info("LMB: Opened connection!")
-		retries := 50
-		for conn.State() != seqs.StateEstablished && retries > 0 {
-			time.Sleep(100 * time.Millisecond)
-			retries--
-		}
-		slog.Info("LMB: Disabling deadline!")
-		conn.SetDeadline(time.Time{}) // Disable the deadline.
-		if retries == 0 {
-			closeConn("tcp establish retry limit exceeded")
-			continue
-		}
-
-		// Send the request.
-		slog.Info("LMB: Sending the request!")
-		_, err = conn.Write(reqbytes)
-		if err != nil {
-			closeConn("writing request: " + err.Error())
-			continue
-		}
-		slog.Info("LMB: Sleep 1111111!")
-		time.Sleep(500 * time.Millisecond)
-		conn.SetDeadline(time.Now().Add(connTimeout))
-		slog.Info("LMB: Reading response")
-		n, err := conn.Read(rxBuf)
-		if n == 0 && err != nil {
-			closeConn("reading response: " + err.Error())
-			continue
-		} else if n == 0 {
-			closeConn("no response")
-			continue
-		}
-		println("got HTTP response!")
-		println(string(rxBuf[:n]))
-		closeConn("done")
-		return // exit program.
 	}
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"image/color"
+	"log/slog"
 	"machine"
 	"os"
 	"time"
@@ -16,14 +17,32 @@ import (
 var pixelColor = color.RGBA{255, 255, 255, 255}
 
 func main() {
-	borrowedNetMain()
+	logger = createLogger()
 
-	setupNetworking()
+	// It seems that it takes a while until the serial console is ready to be
+	// written to. So we sleep for a while until we are sure that any subsequent
+	// logging operations will actually go down the wire.
+	time.Sleep(500 * time.Millisecond)
+
+	logger.Info("The device is alive!")
+
+	// borrowedNetMain()
+
+	stack, dhcpClient, err := createStack()
+	if err != nil {
+		logger.Error("Initializing networking", slog.String("err", err.Error()))
+
+		// TODO: As I said elsewhere, do this in the background, keep re-trying
+		// for as long as needed!
+		panic("Error initializing networking!")
+	}
+
+	makeRequest(stack, dhcpClient)
 
 	dht11 := dht.New(machine.GPIO15, dht.DHT11)
 
 	displayI2C := machine.I2C0
-	err := displayI2C.Configure(machine.I2CConfig{
+	err = displayI2C.Configure(machine.I2CConfig{
 		SCL:       machine.GPIO1,
 		SDA:       machine.GPIO0,
 		Frequency: 400 * machine.KHz,
@@ -88,25 +107,4 @@ func displayText(display ssd1306.Device, text string, x, y int16) {
 			x += int16(w)
 		}
 	}
-}
-
-func setupNetworking() {
-	/***
-	_, stack, _, err := SetupWithDHCP(SetupConfig{
-		Hostname: "why-does-it-matter",
-		// Logger:   logger,
-		TCPPorts: 1, // For HTTP over TCP.
-		UDPPorts: 1, // For DNS.
-	})
-
-	if err != nil {
-		panic("setup DHCP:" + err.Error())
-	}
-
-	start := time.Now()
-	svAddr, err := netip.ParseAddrPort(serverAddrStr)
-	if err != nil {
-		panic("parsing server address:" + err.Error())
-	}
-	***/
 }
