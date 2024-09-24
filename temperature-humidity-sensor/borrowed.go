@@ -7,7 +7,6 @@ import (
 	"net/netip"
 	"time"
 
-	"github.com/soypat/cyw43439"
 	"github.com/soypat/seqs/eth/dns"
 	"github.com/soypat/seqs/stacks"
 )
@@ -22,7 +21,7 @@ const serverAddrStr = "93.184.215.14:80" // example.com
 
 const ourHostname = "tinygo-http-client"
 
-const mtu = cyw43439.MTU
+//const mtu = cyw43439.MTU
 
 type SetupConfig struct {
 	// DHCP requested hostname.

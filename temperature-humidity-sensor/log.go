@@ -5,9 +5,6 @@ import (
 	"machine"
 )
 
-// The logger we'll use to, well, log stuff
-var logger *slog.Logger
-
 // logLevel is the log level we'll use.
 const logLevel = slog.LevelInfo
 

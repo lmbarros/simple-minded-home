@@ -2,11 +2,11 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"log/slog"
 	"math/rand"
 	"net"
 	"net/netip"
+	"sync"
 	"time"
 
 	"github.com/soypat/cyw43439"
@@ -30,128 +30,324 @@ const (
 
 	// We need two UDP ports: one for DNS, one for DHCP.
 	udpPortsCount = 2
+
+	// Use the MTU for the Pi Pico W network device.
+	mtu = cyw43439.MTU
 )
 
-// TODO: At some point I want to have all that as a background thing. Like, keep
-// showing things on the display while trying to connect to the Internet.
+// PicoNetStatus represents the status of a PicoNet.
 //
-// TODO: BTW, "showing things on the display" includes some tiny text showing
-// the connection status while it is not fully working.
-func createStack() (*stacks.PortStack, *stacks.DHCPClient, error) {
-	logger.Info("Creating the networking stack")
+// Things on PicoNet are initialized sequentially. It goes from status to status
+// in the order they are declared below. So, knowing the current status allows
+// to know where in the initialization sequence we are. And if we spend too much
+// time on the same state, it probably means that some error is happening in the
+// next step of the initialization process.
+type PicoNetStatus int
 
-	// Wifi config.
-	wifiCfg := cyw43439.DefaultWifiConfig()
-	wifiCfg.Logger = logger
+const (
+	StatusUninitialized PicoNetStatus = iota
+	StatusCreatingDevice
+	StatusConnectingToWiFi
+	StatusCreatingStack
+	StatusObtainingIP
+	StatusObtainingRouterMAC
+	StatusReadyToGo
+)
 
-	// Initialize Pico W device.
-	logger.Info("Initializing Pico W device")
-	devInitStartTime := time.Now()
-	dev := cyw43439.NewPicoWDevice()
-	if dev == nil {
-		err := errors.New("got a nil device")
-		logger.Error("Creating the Pico W device", slog.String("err", err.Error()))
-		return nil, nil, err
+func (s PicoNetStatus) String() string {
+	switch s {
+	case StatusUninitialized:
+		return "Uninitialized"
+	case StatusCreatingDevice:
+		return "CreatingDevice"
+	case StatusConnectingToWiFi:
+		return "ConnectingToWiFi"
+	case StatusCreatingStack:
+		return "CreatingStack"
+	case StatusObtainingIP:
+		return "ObtainingIP"
+	case StatusObtainingRouterMAC:
+		return "ObtainingRouterMAC"
+	case StatusReadyToGo:
+		return "ReadyToGo"
+	default:
+		return "Invalid"
 	}
-	err := dev.Init(wifiCfg)
-	if err != nil {
-		logger.Error("Initializing the Pico W device", slog.String("err", err.Error()))
-		return nil, nil, fmt.Errorf("Pico W device init failed: %w", err)
-	}
-
-	macAddress, _ := dev.HardwareAddr6()
-	logger.Info("Pico W device initialized",
-		slog.Duration("duration", time.Since(devInitStartTime)),
-		slog.String("mac", net.HardwareAddr(macAddress[:]).String()),
-	)
-
-	// Connect to Wifi.
-	logger.Info("Connecting to WiFi", slog.String("ssid", wifiSSID), slog.Int("passwordLen", len(wifiPassword)))
-	for {
-		err = dev.JoinWPA2(wifiSSID, wifiPassword)
-		if err == nil {
-			break
-		}
-		logger.Error("connecting to WiFi", slog.String("err", err.Error()))
-		time.Sleep(5 * time.Second)
-	}
-	logger.Info("Connected to WiFi")
-
-	// Create the "port stack".
-	stack := stacks.NewPortStack(stacks.PortStackConfig{
-		MAC:             macAddress,
-		MaxOpenPortsUDP: udpPortsCount,
-		MaxOpenPortsTCP: tcpPortsCount,
-		MTU:             mtu,
-		Logger:          logger,
-	})
-
-	if stack == nil {
-		err = errors.New("got a nil PortStack")
-		logger.Error("Creating the port stack", slog.String("err", err.Error()))
-		return nil, nil, err
-	}
-
-	// Handle packets.
-	dev.RecvEthHandle(stack.RecvEth)
-	go nicLoop(dev, stack)
-
-	// Request important stuff via DHCP.
-	dhcpClient := stacks.NewDHCPClient(stack, dhcp.DefaultClientPort)
-	err = dhcpClient.BeginRequest(stacks.DHCPRequestConfig{
-		// The original code set teo additional fields here: `RequestedAddr` and
-		// `Hostname`. I am skipping these intentionally. I am not experienced
-		// with DHCP, but from what I saw, `RequestedAddr` is used when we want
-		// to ask for a specific IP address; not our case here, any will do. And
-		// `Hostname` is our own hostname, which the DHCP server could use for
-		// whatever reason, but doesn't make much sense in this case (I intend
-		// to have several devices running the same firmware, and I don't intend
-		// to make things like the host name configurable).
-		Xid: uint32(time.Now().Nanosecond()),
-	})
-	if err != nil {
-		logger.Error("Beginning DHCP request", slog.String("err", err.Error()))
-		return stack, dhcpClient, errors.New("DHCP begin request:" + err.Error())
-	}
-	i := 0
-	for dhcpClient.State() != dhcp.StateBound {
-		i++
-		logger.Info("DHCP ongoing...")
-		time.Sleep(time.Second / 2)
-		if i > 15 {
-			err = errors.New("DHCP did not complete")
-			logger.Error("DHCP request", slog.String("err", err.Error()))
-			return stack, nil, err
-		}
-	}
-	var primaryDNS netip.Addr
-	dnsServers := dhcpClient.DNSServers()
-	if len(dnsServers) > 0 {
-		primaryDNS = dnsServers[0]
-	} else {
-		logger.Warn("Failed to get a DNS server via DHCP")
-	}
-	ip := dhcpClient.Offer()
-	logger.Info("DHCP complete",
-		slog.Uint64("cidrbits", uint64(dhcpClient.CIDRBits())),
-		slog.String("ourIP", ip.String()),
-		slog.String("dns", primaryDNS.String()),
-		slog.String("broadcast", dhcpClient.BroadcastAddr().String()),
-		slog.String("gateway", dhcpClient.Gateway().String()),
-		slog.String("router", dhcpClient.Router().String()),
-		slog.String("dhcp", dhcpClient.DHCPServer().String()),
-		slog.String("hostname", string(dhcpClient.Hostname())),
-		slog.Duration("lease", dhcpClient.IPLeaseTime()),
-		slog.Duration("renewal", dhcpClient.RenewalTime()),
-		slog.Duration("rebinding", dhcpClient.RebindingTime()),
-	)
-
-	stack.SetAddr(ip) // It's important to set the IP address after DHCP completes.
-
-	return stack, dhcpClient, nil
 }
 
-func nicLoop(dev *cyw43439.Device, stack *stacks.PortStack) {
+// PicoNet is *the* interface to do networking stuff on a Raspberry Pi Pico W --
+// at least on this humble program! :-)
+//
+// You should create just one of those. I mean, the code doesn't really check
+// how many instances do exist, and it may even work with multiple instances,
+// but that's not tested and there's no reason to have more than one!
+type PicoNet struct {
+	// mutex protects all relevant operations performed on a PicoNet.
+	mutex sync.Mutex
+
+	// logger is used internally for all the logging.
+	logger *slog.Logger
+
+	// status tells how things are.
+	status PicoNetStatus
+
+	// Device is the Raspberry Pi Pico W WiFi device.
+	device *cyw43439.Device
+
+	// stack is the network stack used internally.
+	stack *stacks.PortStack
+
+	// dhcpClient is the DHCP client used internally.
+	dhcpClient *stacks.DHCPClient
+
+	// picoMAC is the MAC address of the Pico W.
+	picoMAC [6]byte
+
+	// routerMAC is the MAC address of the router the Pico W is connected to.
+	// We'll send our packets to it.
+	routerMAC [6]byte
+}
+
+// NewPicoNet creates a new PicoNet and starts the background initialization
+// process. You can check the progress with PicoNet.Status().
+func NewPicoNet(logger *slog.Logger) *PicoNet {
+	pn := &PicoNet{
+		logger: logger,
+	}
+
+	go func() {
+		pn.setStatus(StatusCreatingDevice)
+		pn.createDevice()
+
+		pn.setStatus(StatusConnectingToWiFi)
+		pn.connectToWifi()
+
+		pn.setStatus(StatusCreatingStack)
+		pn.createStack()
+
+		pn.setStatus(StatusObtainingIP)
+		pn.obtainIPAddress()
+
+		pn.setStatus(StatusObtainingRouterMAC)
+		pn.obtainRouterMAC()
+
+		pn.setStatus(StatusReadyToGo)
+	}()
+	return pn
+}
+
+func (pn *PicoNet) Status() PicoNetStatus {
+	pn.mutex.Lock()
+	defer pn.mutex.Unlock()
+	return pn.status
+}
+
+func (pn *PicoNet) setStatus(s PicoNetStatus) {
+	pn.mutex.Lock()
+	defer pn.mutex.Unlock()
+	pn.status = s
+}
+
+func (pn *PicoNet) createDevice() {
+	for {
+		startTime := time.Now()
+
+		// Create the Pico W device.
+		pn.logger.Info("Creating the Pi Pico W network device")
+		pn.device = cyw43439.NewPicoWDevice()
+		if pn.device == nil {
+			pn.logger.Error("Got a nil Pi Pico W network device")
+
+			// I think that retrying here unlikely to succeed, but I also don't
+			// see much else we could do. Rebooting the device would not be a
+			// bad idea, but this is better done by the caller.
+			time.Sleep(5 * time.Second)
+			continue
+		}
+
+		pn.logger.Info("Pi Pico W network device created successfully", slogTook(startTime))
+		break
+	}
+
+	for {
+		startTime := time.Now()
+
+		// Initialize the Pico W device.
+		pn.logger.Info("Initializing the Pi Pico W network device")
+		wifiCfg := cyw43439.DefaultWifiConfig()
+		wifiCfg.Logger = pn.logger
+
+		err := pn.device.Init(wifiCfg)
+		if err != nil {
+			pn.logger.Error("Initializing the Pi Pico W network device", slog.String("err", err.Error()))
+			time.Sleep(5 * time.Second)
+			continue
+		}
+
+		pn.picoMAC, err = pn.device.HardwareAddr6()
+		if err != nil {
+			pn.logger.Error("Obtaining the Pi Pico W network device MAC address", slog.String("err", err.Error()))
+			time.Sleep(5 * time.Second)
+			continue
+		}
+
+		pn.logger.Info("Pico W device successfully initialized", slogTook(startTime), slogMAC(pn.picoMAC))
+
+		break
+	}
+}
+
+func (pn *PicoNet) connectToWifi() {
+	for {
+		startTime := time.Now()
+		pn.logger.Info("Connecting to WiFi", slog.String("ssid", wifiSSID), slog.Int("passwordLen", len(wifiPassword)))
+		err := pn.device.JoinWPA2(wifiSSID, wifiPassword)
+		if err != nil {
+			pn.logger.Error("Connecting to WiFi", slog.String("err", err.Error()))
+			time.Sleep(5 * time.Second)
+			continue
+		}
+		pn.logger.Info("Successfully Connected to WiFi", slogTook(startTime))
+		break
+	}
+}
+
+func (pn *PicoNet) createStack() {
+	for {
+		startTime := time.Now()
+
+		pn.logger.Info("Creating the port stack")
+		pn.stack = stacks.NewPortStack(stacks.PortStackConfig{
+			MAC:             pn.picoMAC,
+			MaxOpenPortsUDP: udpPortsCount,
+			MaxOpenPortsTCP: tcpPortsCount,
+			MTU:             mtu,
+			Logger:          pn.logger,
+		})
+
+		if pn.stack == nil {
+			pn.logger.Error("Got a nil port stack")
+			time.Sleep(5 * time.Second)
+			continue
+		}
+
+		pn.device.RecvEthHandle(pn.stack.RecvEth)
+		go pn.nicLoop()
+
+		pn.logger.Info("Successfully created port stack", slogTook(startTime))
+		break
+	}
+}
+
+// TODO: This assumes that we never need to renewal the IP address we received
+// from DHCP. I think this is not correct.
+func (pn *PicoNet) obtainIPAddress() {
+	for {
+		startTime := time.Now()
+		pn.logger.Info("Creating DHCP client")
+		pn.dhcpClient = stacks.NewDHCPClient(pn.stack, dhcp.DefaultClientPort)
+		if pn.dhcpClient == nil {
+			pn.logger.Error("Got a nil DHCP client")
+			time.Sleep(5 * time.Second)
+			continue
+		}
+
+		pn.logger.Info("Successfully created DHCP client", slogTook(startTime))
+		break
+	}
+
+	for {
+		startTime := time.Now()
+		pn.logger.Info("Starting DHCP request")
+
+		err := pn.dhcpClient.BeginRequest(stacks.DHCPRequestConfig{
+			// The original code set two additional fields here: `RequestedAddr`
+			// and `Hostname`. I am skipping these intentionally. I am not
+			// experienced with DHCP, but from what I saw, `RequestedAddr` is
+			// used when we want to ask for a specific IP address; not our case
+			// here, any will do. And `Hostname` is our own hostname, which the
+			// DHCP server could use for whatever reason, but doesn't make much
+			// sense in this case (I intend to have several devices running the
+			// same firmware, and I don't intend to make things like the host
+			// name configurable).
+			Xid: uint32(time.Now().Nanosecond()),
+		})
+
+		if err != nil {
+			pn.logger.Error("Starting DHCP request", slog.String("err", err.Error()))
+			time.Sleep(4 * time.Second)
+			continue
+		}
+
+		pn.logger.Info("Successfully started DHCP request", slogTook(startTime))
+		break
+	}
+
+	for {
+		startTime := time.Now()
+
+		const maxRetries = 15
+		retries := maxRetries
+		for pn.dhcpClient.State() != dhcp.StateBound {
+			retries--
+			pn.logger.Info("DHCP ongoing...")
+			if retries == 0 {
+				pn.logger.Error("DHCP did not complete")
+				time.Sleep(5 * time.Second)
+				continue
+			}
+			time.Sleep(time.Second / 2)
+		}
+
+		var primaryDNS netip.Addr
+		dnsServers := pn.dhcpClient.DNSServers()
+		if len(dnsServers) > 0 {
+			primaryDNS = dnsServers[0]
+		} else {
+			pn.logger.Warn("Failed to get a DNS server via DHCP")
+		}
+
+		// We've got an IP address!
+		ip := pn.dhcpClient.Offer()
+		pn.stack.SetAddr(ip)
+
+		pn.logger.Info("Successfully completed the DHCP request",
+			slog.Uint64("cidrBits", uint64(pn.dhcpClient.CIDRBits())),
+			slog.String("ourIP", ip.String()),
+			slog.String("dns", primaryDNS.String()),
+			slog.String("broadcast", pn.dhcpClient.BroadcastAddr().String()),
+			slog.String("gateway", pn.dhcpClient.Gateway().String()),
+			slog.String("router", pn.dhcpClient.Router().String()),
+			slog.String("dhcp", pn.dhcpClient.DHCPServer().String()),
+			slog.String("hostname", string(pn.dhcpClient.Hostname())),
+			slog.Duration("lease", pn.dhcpClient.IPLeaseTime()),
+			slog.Duration("renewal", pn.dhcpClient.RenewalTime()),
+			slog.Duration("rebinding", pn.dhcpClient.RebindingTime()),
+			slogTook(startTime),
+		)
+		break
+	}
+}
+
+func (pn *PicoNet) obtainRouterMAC() {
+	for {
+		startTime := time.Now()
+		pn.logger.Info("Obtaining router MAC address")
+
+		var err error
+		pn.routerMAC, err = resolveHardwareAddr(pn.stack, pn.dhcpClient.Router())
+		if err != nil {
+			pn.logger.Error("Obtaining router MAC address", slog.String("err", err.Error()))
+			time.Sleep(5 * time.Second)
+			continue
+		}
+
+		pn.logger.Info("Successfully obtained the router MAC address", slogMAC(pn.routerMAC), slogTook(startTime))
+		break
+	}
+}
+
+func (pn *PicoNet) nicLoop() {
 	// Maximum number of packets to queue before sending them.
 	const (
 		queueSize                = 3
@@ -173,9 +369,9 @@ func nicLoop(dev *cyw43439.Device, stack *stacks.PortStack) {
 
 		// Poll for incoming packets.
 		for i := 0; i < 1; i++ {
-			gotPacket, err := dev.PollOne()
+			gotPacket, err := pn.device.PollOne()
 			if err != nil {
-				logger.Error("Poll error in NIC loop", slog.String("err", err.Error()))
+				pn.logger.Error("Poll error in NIC loop", slog.String("err", err.Error()))
 			}
 			if !gotPacket {
 				break
@@ -190,9 +386,9 @@ func nicLoop(dev *cyw43439.Device, stack *stacks.PortStack) {
 			}
 			var err error
 			buf := queue[i][:]
-			lenBuf[i], err = stack.HandleEth(buf[:])
+			lenBuf[i], err = pn.stack.HandleEth(buf[:])
 			if err != nil {
-				logger.Error("Ethernet handling error in NIC loop",
+				pn.logger.Error("Ethernet handling error in NIC loop",
 					slog.String("err", err.Error()),
 					slog.Int("lenBuf[i]", lenBuf[i]),
 				)
@@ -218,13 +414,13 @@ func nicLoop(dev *cyw43439.Device, stack *stacks.PortStack) {
 			if n <= 0 {
 				continue
 			}
-			err := dev.SendEth(queue[i][:n])
+			err := pn.device.SendEth(queue[i][:n])
 			if err != nil {
 				// Queue packet for retransmission.
 				retries[i]++
 				if retries[i] > maxRetriesBeforeDropping {
 					markSent(i)
-					logger.Error("Dropped outgoing packet in NIC loop", slog.String("err", err.Error()))
+					pn.logger.Error("Dropped outgoing packet in NIC loop", slog.String("err", err.Error()))
 				}
 			} else {
 				markSent(i)
@@ -262,7 +458,7 @@ func resolveHardwareAddr(stack *stacks.PortStack, ip netip.Addr) ([6]byte, error
 }
 
 // TODO: Too much hardcoded stuff here!
-func makeRequest(stack *stacks.PortStack, dhcpClient *stacks.DHCPClient) {
+func makeRequest(pn *PicoNet) {
 	start := time.Now()
 
 	svAddr, err := netip.ParseAddrPort(serverAddrStr)
@@ -270,18 +466,11 @@ func makeRequest(stack *stacks.PortStack, dhcpClient *stacks.DHCPClient) {
 		panic("parsing server address:" + err.Error())
 	}
 
-	// Resolver router's hardware address to dial outside our network to internet.
-	routerMAC, err := resolveHardwareAddr(stack, dhcpClient.Router())
-	if err != nil {
-		panic("router hwaddr resolving:" + err.Error()) // xxxxxxxxxxxxx TODO: don't panic!
-	}
-	logger.Info("Got the router MAC address", slog.String("mac", net.HardwareAddr(routerMAC[:]).String()))
-
 	rng := rand.New(rand.NewSource(int64(time.Now().Sub(start))))
 
 	// Start TCP server.
-	clientAddr := netip.AddrPortFrom(stack.Addr(), uint16(rng.Intn(65535-1024)+1024))
-	conn, err := stacks.NewTCPConn(stack, stacks.TCPConnConfig{
+	clientAddr := netip.AddrPortFrom(pn.stack.Addr(), uint16(rng.Intn(65535-1024)+1024))
+	conn, err := stacks.NewTCPConn(pn.stack, stacks.TCPConnConfig{
 		TxBufSize: tcpBufSize,
 		RxBufSize: tcpBufSize,
 	})
@@ -311,7 +500,7 @@ func makeRequest(stack *stacks.PortStack, dhcpClient *stacks.DHCPClient) {
 	// req.SetHost("pudim.com.br")
 	reqBytes := req.Header()
 
-	logger.Info("tcp:ready",
+	pn.logger.Info("tcp:ready",
 		slog.String("clientAddr", clientAddr.String()),
 		slog.String("serverAddr", serverAddrStr),
 	)
@@ -322,7 +511,7 @@ func makeRequest(stack *stacks.PortStack, dhcpClient *stacks.DHCPClient) {
 
 		// Make sure to timeout the connection if it takes too long.
 		conn.SetDeadline(time.Now().Add(connTimeout))
-		err = conn.OpenDialTCP(clientAddr.Port(), routerMAC, svAddr, seqs.Value(rng.Intn(65535-1024)+1024))
+		err = conn.OpenDialTCP(clientAddr.Port(), pn.routerMAC, svAddr, seqs.Value(rng.Intn(65535-1024)+1024))
 		if err != nil {
 			closeConn("opening TCP: " + err.Error())
 			continue
@@ -364,4 +553,12 @@ func makeRequest(stack *stacks.PortStack, dhcpClient *stacks.DHCPClient) {
 		closeConn("done")
 		return // exit program.
 	}
+}
+
+func slogTook(start time.Time) slog.Attr {
+	return slog.Duration("took", time.Since(start))
+}
+
+func slogMAC(mac [6]byte) slog.Attr {
+	return slog.String("mac", net.HardwareAddr(mac[:]).String())
 }

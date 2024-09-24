@@ -10,6 +10,7 @@ import (
 
 	"tinygo.org/x/drivers/dht"
 	"tinygo.org/x/drivers/ssd1306"
+	"tinygo.org/x/tinyfont"
 )
 
 // pixelColor is the color we use when drawing things. We use a 1-bit display,
@@ -17,7 +18,7 @@ import (
 var pixelColor = color.RGBA{255, 255, 255, 255}
 
 func main() {
-	logger = createLogger()
+	logger := createLogger()
 
 	// It seems that it takes a while until the serial console is ready to be
 	// written to. So we sleep for a while until we are sure that any subsequent
@@ -28,21 +29,23 @@ func main() {
 
 	// borrowedNetMain()
 
-	stack, dhcpClient, err := createStack()
-	if err != nil {
-		logger.Error("Initializing networking", slog.String("err", err.Error()))
+	// stack, dhcpClient, err := createStack()
+	// if err != nil {
+	// 	logger.Error("Initializing networking", slog.String("err", err.Error()))
 
-		// TODO: As I said elsewhere, do this in the background, keep re-trying
-		// for as long as needed!
-		panic("Error initializing networking!")
-	}
+	// 	// TODO: As I said elsewhere, do this in the background, keep re-trying
+	// 	// for as long as needed!
+	// 	panic("Error initializing networking!")
+	// }
 
-	makeRequest(stack, dhcpClient)
+	// makeRequest(stack, dhcpClient)
+
+	pn := NewPicoNet(logger)
 
 	dht11 := dht.New(machine.GPIO15, dht.DHT11)
 
 	displayI2C := machine.I2C0
-	err = displayI2C.Configure(machine.I2CConfig{
+	err := displayI2C.Configure(machine.I2CConfig{
 		SCL:       machine.GPIO1,
 		SDA:       machine.GPIO0,
 		Frequency: 400 * machine.KHz,
@@ -62,6 +65,8 @@ func main() {
 	display.ClearDisplay()
 
 	for {
+		status := pn.Status()
+		logger.Info("PicoNet status", slog.String("status", status.String()))
 		time.Sleep(5 * time.Second)
 
 		temperature, err := dht11.TemperatureFloat(dht.C)
@@ -91,6 +96,10 @@ func main() {
 		// tinyfont.WriteLine(&display, &tinyfont.TomThumb, 84, 40, "Debug text!", pixelColor)
 		// tinyfont.WriteLine(&display, &tinyfont.TomThumb, 84, 48, "More debug...", pixelColor)
 		// tinyfont.WriteLine(&display, &tinyfont.TomThumb, 84, 56, "n' then some.", pixelColor)
+		tinyfont.WriteLine(&display, &tinyfont.TomThumb, 84, 40, string(status), pixelColor)
+		if status == StatusReadyToGo {
+			makeRequest(pn)
+		}
 
 		display.Display()
 	}
