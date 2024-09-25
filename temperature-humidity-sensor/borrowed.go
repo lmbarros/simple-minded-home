@@ -2,13 +2,8 @@
 package main
 
 import (
-	"errors"
 	"log/slog"
-	"net/netip"
 	"time"
-
-	"github.com/soypat/seqs/eth/dns"
-	"github.com/soypat/seqs/stacks"
 )
 
 const connTimeout = 5 * time.Second
@@ -143,92 +138,92 @@ type SetupConfig struct {
 // 	return dhcpClient, stack, dev, nil
 // }
 
-type Resolver struct {
-	stack     *stacks.PortStack
-	dns       *stacks.DNSClient
-	dhcp      *stacks.DHCPClient
-	dnsaddr   netip.Addr
-	dnshwaddr [6]byte
-}
+// type Resolver struct {
+// 	stack     *stacks.PortStack
+// 	dns       *stacks.DNSClient
+// 	dhcp      *stacks.DHCPClient
+// 	dnsaddr   netip.Addr
+// 	dnshwaddr [6]byte
+// }
 
-func NewResolver(stack *stacks.PortStack, dhcp *stacks.DHCPClient) (*Resolver, error) {
-	dnsClient := stacks.NewDNSClient(stack, dns.ClientPort)
-	dnsAddrs := dhcp.DNSServers()
-	if len(dnsAddrs) > 0 && !dnsAddrs[0].IsValid() {
-		return nil, errors.New("dns addr obtained via DHCP not valid")
-	}
-	return &Resolver{
-		stack:   stack,
-		dhcp:    dhcp,
-		dns:     dnsClient,
-		dnsaddr: dnsAddrs[0],
-	}, nil
-}
+// func NewResolver(stack *stacks.PortStack, dhcp *stacks.DHCPClient) (*Resolver, error) {
+// 	dnsClient := stacks.NewDNSClient(stack, dns.ClientPort)
+// 	dnsAddrs := dhcp.DNSServers()
+// 	if len(dnsAddrs) > 0 && !dnsAddrs[0].IsValid() {
+// 		return nil, errors.New("dns addr obtained via DHCP not valid")
+// 	}
+// 	return &Resolver{
+// 		stack:   stack,
+// 		dhcp:    dhcp,
+// 		dns:     dnsClient,
+// 		dnsaddr: dnsAddrs[0],
+// 	}, nil
+// }
 
-func (r *Resolver) LookupNetIP(host string) ([]netip.Addr, error) {
-	name, err := dns.NewName(host)
-	if err != nil {
-		return nil, err
-	}
-	err = r.updateDNSHWAddr()
-	if err != nil {
-		return nil, err
-	}
+// func (r *Resolver) LookupNetIP(host string) ([]netip.Addr, error) {
+// 	name, err := dns.NewName(host)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	err = r.updateDNSHWAddr()
+// 	if err != nil {
+// 		return nil, err
+// 	}
 
-	err = r.dns.StartResolve(r.dnsConfig(name))
-	if err != nil {
-		return nil, err
-	}
-	time.Sleep(5 * time.Millisecond)
-	retries := 100
+// 	err = r.dns.StartResolve(r.dnsConfig(name))
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	time.Sleep(5 * time.Millisecond)
+// 	retries := 100
 
-	for retries > 0 {
-		done, _ := r.dns.IsDone()
-		if done {
-			break
-		}
-		retries--
-		time.Sleep(20 * time.Millisecond)
-	}
-	done, retCode := r.dns.IsDone()
-	if !done && retries == 0 {
-		return nil, errors.New("dns lookup timed out")
-	} else if retCode != dns.RCodeSuccess {
-		return nil, errors.New("dns lookup failed:" + retCode.String())
-	}
-	answers := r.dns.Answers()
-	if len(answers) == 0 {
-		return nil, errors.New("no dns answers")
-	}
-	var addrs []netip.Addr
-	for i := range answers {
-		data := answers[i].RawData()
-		if len(data) == 4 {
-			addrs = append(addrs, netip.AddrFrom4([4]byte(data)))
-		}
-	}
-	if len(addrs) == 0 {
-		return nil, errors.New("no ipv4 dns answers")
-	}
-	return addrs, nil
-}
+// 	for retries > 0 {
+// 		done, _ := r.dns.IsDone()
+// 		if done {
+// 			break
+// 		}
+// 		retries--
+// 		time.Sleep(20 * time.Millisecond)
+// 	}
+// 	done, retCode := r.dns.IsDone()
+// 	if !done && retries == 0 {
+// 		return nil, errors.New("dns lookup timed out")
+// 	} else if retCode != dns.RCodeSuccess {
+// 		return nil, errors.New("dns lookup failed:" + retCode.String())
+// 	}
+// 	answers := r.dns.Answers()
+// 	if len(answers) == 0 {
+// 		return nil, errors.New("no dns answers")
+// 	}
+// 	var addrs []netip.Addr
+// 	for i := range answers {
+// 		data := answers[i].RawData()
+// 		if len(data) == 4 {
+// 			addrs = append(addrs, netip.AddrFrom4([4]byte(data)))
+// 		}
+// 	}
+// 	if len(addrs) == 0 {
+// 		return nil, errors.New("no ipv4 dns answers")
+// 	}
+// 	return addrs, nil
+// }
 
-func (r *Resolver) updateDNSHWAddr() (err error) {
-	r.dnshwaddr, err = resolveHardwareAddr(r.stack, r.dnsaddr)
-	return err
-}
+// func (r *Resolver) updateDNSHWAddr() (err error) {
+// 	r.dnshwaddr, err = resolveHardwareAddr(r.stack, r.dnsaddr)
+// 	return err
+// }
 
-func (r *Resolver) dnsConfig(name dns.Name) stacks.DNSResolveConfig {
-	return stacks.DNSResolveConfig{
-		Questions: []dns.Question{
-			{
-				Name:  name,
-				Type:  dns.TypeA,
-				Class: dns.ClassINET,
-			},
-		},
-		DNSAddr:         r.dnsaddr,
-		DNSHWAddr:       r.dnshwaddr,
-		EnableRecursion: true,
-	}
-}
+// func (r *Resolver) dnsConfig(name dns.Name) stacks.DNSResolveConfig {
+// 	return stacks.DNSResolveConfig{
+// 		Questions: []dns.Question{
+// 			{
+// 				Name:  name,
+// 				Type:  dns.TypeA,
+// 				Class: dns.ClassINET,
+// 			},
+// 		},
+// 		DNSAddr:         r.dnsaddr,
+// 		DNSHWAddr:       r.dnshwaddr,
+// 		EnableRecursion: true,
+// 	}
+// }

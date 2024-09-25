@@ -12,6 +12,7 @@ import (
 	"github.com/soypat/cyw43439"
 	"github.com/soypat/seqs"
 	"github.com/soypat/seqs/eth/dhcp"
+	"github.com/soypat/seqs/eth/dns"
 	"github.com/soypat/seqs/httpx"
 	"github.com/soypat/seqs/stacks"
 )
@@ -35,6 +36,12 @@ const (
 	mtu = cyw43439.MTU
 )
 
+var (
+	// WiFiNotReadyError is returned to indicate that an operation cannot be
+	// completed because the WiFi device or connection isn't ready yet.
+	WiFiNotReadyError = errors.New("WiFi not ready")
+)
+
 // PicoNetStatus represents the status of a PicoNet.
 //
 // Things on PicoNet are initialized sequentially. It goes from status to status
@@ -50,6 +57,7 @@ const (
 	StatusConnectingToWiFi
 	StatusCreatingStack
 	StatusObtainingIP
+	StatusConfiguringDNS
 	StatusObtainingRouterMAC
 	StatusReadyToGo
 )
@@ -66,6 +74,8 @@ func (s PicoNetStatus) String() string {
 		return "CreatingStack"
 	case StatusObtainingIP:
 		return "ObtainingIP"
+	case StatusConfiguringDNS:
+		return "ConfiguringDNS"
 	case StatusObtainingRouterMAC:
 		return "ObtainingRouterMAC"
 	case StatusReadyToGo:
@@ -100,6 +110,13 @@ type PicoNet struct {
 	// dhcpClient is the DHCP client used internally.
 	dhcpClient *stacks.DHCPClient
 
+	// dnsClient is used to resolve names.
+	dnsClient *stacks.DNSClient
+
+	// dnsIP is the IP address of the primary DNS server. We currently don't try
+	// to use any DNS server other than the primary one.
+	dnsIP netip.Addr
+
 	// picoMAC is the MAC address of the Pico W.
 	picoMAC [6]byte
 
@@ -109,7 +126,12 @@ type PicoNet struct {
 }
 
 // NewPicoNet creates a new PicoNet and starts the background initialization
-// process. You can check the progress with PicoNet.Status().
+// process.
+//
+// The background initialization process will keep retrying any failing
+// operations, even if some of them are pretty much guaranteed to fail again.
+// You should check the initialization progress with PicoNet.Status() and handle
+// long-running initialization errors as desired.
 func NewPicoNet(logger *slog.Logger) *PicoNet {
 	pn := &PicoNet{
 		logger: logger,
@@ -127,6 +149,9 @@ func NewPicoNet(logger *slog.Logger) *PicoNet {
 
 		pn.setStatus(StatusObtainingIP)
 		pn.obtainIPAddress()
+
+		pn.setStatus(StatusConfiguringDNS)
+		pn.configureDNS()
 
 		pn.setStatus(StatusObtainingRouterMAC)
 		pn.obtainRouterMAC()
@@ -275,7 +300,7 @@ func (pn *PicoNet) obtainIPAddress() {
 
 		if err != nil {
 			pn.logger.Error("Starting DHCP request", slog.String("err", err.Error()))
-			time.Sleep(4 * time.Second)
+			time.Sleep(5 * time.Second)
 			continue
 		}
 
@@ -303,8 +328,6 @@ func (pn *PicoNet) obtainIPAddress() {
 		dnsServers := pn.dhcpClient.DNSServers()
 		if len(dnsServers) > 0 {
 			primaryDNS = dnsServers[0]
-		} else {
-			pn.logger.Warn("Failed to get a DNS server via DHCP")
 		}
 
 		// We've got an IP address!
@@ -329,6 +352,29 @@ func (pn *PicoNet) obtainIPAddress() {
 	}
 }
 
+func (pn *PicoNet) configureDNS() {
+	for {
+		startTime := time.Now()
+		pn.logger.Info("Configuring DNS")
+
+		dnsServers := pn.dhcpClient.DNSServers()
+
+		if len(dnsServers) == 0 || !dnsServers[0].IsValid() {
+			// This is one case in which retrying is pointless. We do follow the
+			// same pattern, nevertheless, to make error handling consistent.
+			pn.logger.Error("Didn't get any DNS server via DHCP")
+			time.Sleep(5 * time.Second)
+			continue
+		}
+
+		pn.dnsClient = stacks.NewDNSClient(pn.stack, dns.ClientPort)
+		pn.dnsIP = dnsServers[0]
+
+		pn.logger.Info("Successfully configured DNS", slogTook(startTime))
+		break
+	}
+}
+
 func (pn *PicoNet) obtainRouterMAC() {
 	for {
 		startTime := time.Now()
@@ -344,6 +390,67 @@ func (pn *PicoNet) obtainRouterMAC() {
 
 		pn.logger.Info("Successfully obtained the router MAC address", slogMAC(pn.routerMAC), slogTook(startTime))
 		break
+	}
+}
+
+func (pn *PicoNet) LookupNetIP(host string) ([]netip.Addr, error) {
+	name, err := dns.NewName(host)
+	if err != nil {
+		return nil, err
+	}
+
+	err = pn.dnsClient.StartResolve(pn.dnsConfig(name))
+	if err != nil {
+		return nil, err
+	}
+	time.Sleep(5 * time.Millisecond)
+
+	// 100 retries with 50ms delays gives us 5s to resolve. Should be more than
+	// enough even with really bad networking.
+	retries := 100
+	for retries > 0 {
+		done, _ := pn.dnsClient.IsDone()
+		if done {
+			break
+		}
+		retries--
+		time.Sleep(50 * time.Millisecond)
+	}
+	done, retCode := pn.dnsClient.IsDone()
+	if !done && retries == 0 {
+		return nil, errors.New("DNS lookup timed out")
+	} else if retCode != dns.RCodeSuccess {
+		return nil, errors.New("DNS lookup failed:" + retCode.String())
+	}
+	answers := pn.dnsClient.Answers()
+	if len(answers) == 0 {
+		return nil, errors.New("no DNS answers")
+	}
+	var addrs []netip.Addr
+	for i := range answers {
+		data := answers[i].RawData()
+		if len(data) == 4 {
+			addrs = append(addrs, netip.AddrFrom4([4]byte(data)))
+		}
+	}
+	if len(addrs) == 0 {
+		return nil, errors.New("no ipv4 DNS answers")
+	}
+	return addrs, nil
+}
+
+func (pn *PicoNet) dnsConfig(name dns.Name) stacks.DNSResolveConfig {
+	return stacks.DNSResolveConfig{
+		Questions: []dns.Question{
+			{
+				Name:  name,
+				Type:  dns.TypeA,
+				Class: dns.ClassINET,
+			},
+		},
+		DNSAddr:         pn.dnsIP,     // Send DNS the request to this server...
+		DNSHWAddr:       pn.routerMAC, // ...through our router.
+		EnableRecursion: true,
 	}
 }
 
@@ -562,3 +669,5 @@ func slogTook(start time.Time) slog.Attr {
 func slogMAC(mac [6]byte) slog.Attr {
 	return slog.String("mac", net.HardwareAddr(mac[:]).String())
 }
+
+// TODO: slogError

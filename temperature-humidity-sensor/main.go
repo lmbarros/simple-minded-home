@@ -98,7 +98,14 @@ func main() {
 		// tinyfont.WriteLine(&display, &tinyfont.TomThumb, 84, 56, "n' then some.", pixelColor)
 		tinyfont.WriteLine(&display, &tinyfont.TomThumb, 84, 40, string(status), pixelColor)
 		if status == StatusReadyToGo {
-			makeRequest(pn)
+			// makeRequest(pn)
+			logger.Warn("Resolving address")
+			addrs, err := pn.LookupNetIP("terra.com.br")
+			if len(addrs) == 0 {
+				logger.Warn("Result (bad)", slog.Int("numAddrs", len(addrs)), slog.String("err", err.Error()))
+			} else {
+				logger.Warn("Result (good)", slog.Int("numAddrs", len(addrs)), slog.String("addr", addrs[0].String()))
+			}
 		}
 
 		display.Display()
