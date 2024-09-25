@@ -204,14 +204,14 @@ func (pn *PicoNet) createDevice() {
 
 		err := pn.device.Init(wifiCfg)
 		if err != nil {
-			pn.logger.Error("Initializing the WiFi device", slog.String("err", err.Error()))
+			pn.logger.Error("Initializing the WiFi device", slogError(err))
 			time.Sleep(5 * time.Second)
 			continue
 		}
 
 		pn.picoMAC, err = pn.device.HardwareAddr6()
 		if err != nil {
-			pn.logger.Error("Obtaining the WiFi device MAC address", slog.String("err", err.Error()))
+			pn.logger.Error("Obtaining the WiFi device MAC address", slogError(err))
 			time.Sleep(5 * time.Second)
 			continue
 		}
@@ -228,7 +228,7 @@ func (pn *PicoNet) connectToWifi() {
 		pn.logger.Info("Connecting to WiFi", slog.String("ssid", wifiSSID), slog.Int("passwordLen", len(wifiPassword)))
 		err := pn.device.JoinWPA2(wifiSSID, wifiPassword)
 		if err != nil {
-			pn.logger.Error("Connecting to WiFi", slog.String("err", err.Error()))
+			pn.logger.Error("Connecting to WiFi", slogError(err))
 			time.Sleep(5 * time.Second)
 			continue
 		}
@@ -299,7 +299,7 @@ func (pn *PicoNet) obtainIPAddress() {
 		})
 
 		if err != nil {
-			pn.logger.Error("Starting DHCP request", slog.String("err", err.Error()))
+			pn.logger.Error("Starting DHCP request", slogError(err))
 			time.Sleep(5 * time.Second)
 			continue
 		}
@@ -383,7 +383,7 @@ func (pn *PicoNet) obtainRouterMAC() {
 		var err error
 		pn.routerMAC, err = resolveHardwareAddr(pn.stack, pn.dhcpClient.Router())
 		if err != nil {
-			pn.logger.Error("Obtaining router MAC address", slog.String("err", err.Error()))
+			pn.logger.Error("Obtaining router MAC address", slogError(err))
 			time.Sleep(5 * time.Second)
 			continue
 		}
@@ -478,7 +478,7 @@ func (pn *PicoNet) nicLoop() {
 		for i := 0; i < 1; i++ {
 			gotPacket, err := pn.device.PollOne()
 			if err != nil {
-				pn.logger.Error("Poll error in NIC loop", slog.String("err", err.Error()))
+				pn.logger.Error("Poll error in NIC loop", slogError(err))
 			}
 			if !gotPacket {
 				break
@@ -496,7 +496,7 @@ func (pn *PicoNet) nicLoop() {
 			lenBuf[i], err = pn.stack.HandleEth(buf[:])
 			if err != nil {
 				pn.logger.Error("Ethernet handling error in NIC loop",
-					slog.String("err", err.Error()),
+					slogError(err),
 					slog.Int("lenBuf[i]", lenBuf[i]),
 				)
 				lenBuf[i] = 0
@@ -527,7 +527,7 @@ func (pn *PicoNet) nicLoop() {
 				retries[i]++
 				if retries[i] > maxRetriesBeforeDropping {
 					markSent(i)
-					pn.logger.Error("Dropped outgoing packet in NIC loop", slog.String("err", err.Error()))
+					pn.logger.Error("Dropped outgoing packet in NIC loop", slogError(err))
 				}
 			} else {
 				markSent(i)
@@ -670,4 +670,10 @@ func slogMAC(mac [6]byte) slog.Attr {
 	return slog.String("mac", net.HardwareAddr(mac[:]).String())
 }
 
-// TODO: slogError
+func slogError(err error) slog.Attr {
+	errString := "<nil>"
+	if err != nil {
+		errString = err.Error()
+	}
+	return slog.String("err", errString)
+}
