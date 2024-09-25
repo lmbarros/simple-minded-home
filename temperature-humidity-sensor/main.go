@@ -101,7 +101,6 @@ func main() {
 			// makeRequest(pn)
 			logger.Warn("Resolving address")
 
-			// TODO: This works the first time, then fails with "port unavailable"
 			addrs, err := pn.LookupNetIP("terra.com.br")
 			if len(addrs) == 0 {
 				logger.Warn("Result (bad)", slog.Int("numAddrs", len(addrs)), slog.String("err", err.Error()))

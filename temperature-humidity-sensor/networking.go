@@ -403,6 +403,8 @@ func (pn *PicoNet) LookupNetIP(host string) ([]netip.Addr, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer pn.stack.CloseUDP(dns.ClientPort)
+
 	time.Sleep(5 * time.Millisecond)
 
 	// 100 retries with 50ms delays gives us 5s to resolve. Should be more than
@@ -434,7 +436,7 @@ func (pn *PicoNet) LookupNetIP(host string) ([]netip.Addr, error) {
 		}
 	}
 	if len(addrs) == 0 {
-		return nil, errors.New("no ipv4 DNS answers")
+		return nil, errors.New("no IPv4 DNS answers")
 	}
 	return addrs, nil
 }
