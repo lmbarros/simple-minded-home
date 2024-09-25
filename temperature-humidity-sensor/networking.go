@@ -2,10 +2,14 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"math/rand"
 	"net"
 	"net/netip"
+	"net/url"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -538,6 +542,57 @@ func (pn *PicoNet) nicLoop() {
 	}
 }
 
+// Pretty bad naming here, and possibly because this function is trying to do
+// too much. Anyway, takes something like "http://example.com/whatever" or
+// "http://192.168.171.171:8080" and returns the important bits in data types we
+// can actually use. And, yes, this includes making a DNS request if necessary.
+func (pn *PicoNet) getUsableAddress(urlStr string) (addrPort netip.AddrPort, host, path string, err error) {
+
+	if !strings.HasPrefix(urlStr, "http://") {
+		err = errors.New("URL must use the http scheme")
+		return
+	}
+
+	u, err := url.Parse(urlStr)
+
+	path = u.Path
+	host = u.Hostname()
+	strPort := u.Port()
+	if strPort == "" {
+		strPort = "80"
+	}
+
+	hostPort := host + ":" + strPort
+
+	uint64Port, err := strconv.ParseUint(strPort, 10, 16)
+	if err != nil {
+		err = fmt.Errorf("resolving %q: %w", host, err)
+		return
+	}
+
+	uint16Port := uint16(uint64Port)
+
+	isIP := net.ParseIP(host) != nil
+	if isIP {
+		addrPort, err = netip.ParseAddrPort(hostPort)
+		return
+	}
+
+	// The passed URL does not use an IP directly, so we need to make a DNS
+	// request.
+	addrs, err := pn.LookupNetIP(host)
+	if err != nil {
+		err = fmt.Errorf("resolving %q: %w", host, err)
+		return
+	}
+
+	// LookupNetIP will return an error if it can't get any IPv4 addresses, so
+	// it's guaranteed that addrs[0] will contain something!
+	addrPort = netip.AddrPortFrom(addrs[0], uint16Port)
+
+	return
+}
+
 // resolveHardwareAddr obtains the hardware address of the given IP address.
 func resolveHardwareAddr(stack *stacks.PortStack, ip netip.Addr) ([6]byte, error) {
 	if !ip.IsValid() {
@@ -566,17 +621,17 @@ func resolveHardwareAddr(stack *stacks.PortStack, ip netip.Addr) ([6]byte, error
 	return hw, err
 }
 
-// TODO: Too much hardcoded stuff here!
-func makeRequest(pn *PicoNet) {
+// TODO: Transform into Get() and Post() methods. Or something more generic than
+// that even.
+func (pn *PicoNet) makeRequest(urlStr string) {
 	const connTimeout = 5 * time.Second
-	const tcpBufSize = 2030                  // MTU - ethhdr - iphdr - tcphdr
-	const serverAddrStr = "93.184.215.14:80" // example.com
+	const tcpBufSize = 2030 // MTU - ethhdr - iphdr - tcphdr
 
 	start := time.Now()
 
-	svAddr, err := netip.ParseAddrPort(serverAddrStr)
+	addrPort, host, path, err := pn.getUsableAddress(urlStr)
 	if err != nil {
-		panic("parsing server address:" + err.Error())
+		pn.logger.Error("Making request", slogError(err))
 	}
 
 	rng := rand.New(rand.NewSource(int64(time.Now().Sub(start))))
@@ -604,27 +659,27 @@ func makeRequest(pn *PicoNet) {
 	// Here we create the HTTP request and generate the bytes. The Header method
 	// returns the raw header bytes as should be sent over the wire.
 	var req httpx.RequestHeader
-	req.SetRequestURI("/")
+	req.SetRequestURI(path)
+
 	// If you need a Post request change "GET" to "POST" and then add the
 	// post data to reqBytes: `postReq := append(reqBytes, postData...)` and send postReq over TCP.
 	req.SetMethod("GET")
-	req.SetHost(svAddr.Addr().String())
-	req.SetHost("example.com")
-	// req.SetHost("pudim.com.br")
+	req.SetHost(addrPort.Addr().String())
+	req.SetHost(host)
 	reqBytes := req.Header()
 
 	pn.logger.Info("tcp:ready",
 		slog.String("clientAddr", clientAddr.String()),
-		slog.String("serverAddr", serverAddrStr),
+		slog.String("serverAddr", urlStr),
 	)
 	rxBuf := make([]byte, 1024*10)
 	for {
 		time.Sleep(5 * time.Second)
-		slog.Info("dialing", slog.String("serverAddr", serverAddrStr))
+		slog.Info("dialing", slog.String("serverAddr", addrPort.String()))
 
 		// Make sure to timeout the connection if it takes too long.
 		conn.SetDeadline(time.Now().Add(connTimeout))
-		err = conn.OpenDialTCP(clientAddr.Port(), pn.routerMAC, svAddr, seqs.Value(rng.Intn(65535-1024)+1024))
+		err = conn.OpenDialTCP(clientAddr.Port(), pn.routerMAC, addrPort, seqs.Value(rng.Intn(65535-1024)+1024))
 		if err != nil {
 			closeConn("opening TCP: " + err.Error())
 			continue
