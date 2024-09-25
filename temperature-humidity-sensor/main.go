@@ -27,17 +27,6 @@ func main() {
 
 	logger.Info("The device is alive!")
 
-	// borrowedNetMain()
-
-	// stack, dhcpClient, err := createStack()
-	// if err != nil {
-	// 	logger.Error("Initializing networking", slog.String("err", err.Error()))
-
-	// 	// TODO: As I said elsewhere, do this in the background, keep re-trying
-	// 	// for as long as needed!
-	// 	panic("Error initializing networking!")
-	// }
-
 	// makeRequest(stack, dhcpClient)
 
 	pn := NewPicoNet(logger)

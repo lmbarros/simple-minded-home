@@ -22,23 +22,16 @@ import (
 )
 
 //
-// Things here are largely based on the "http-client" example from the
+// Things on this file are largely based on the "http-client" example from the
 // soypat/cyw43439 Github repo, which the work-in-progress repo for supporting
 // the Pi Pico W wireless networking on tinygo. Here's the specific version I
 // used as reference:
 // https://github.com/soypat/cyw43439/tree/a62ee4027d66bc0f92d4f7bc3902627fb8e6ed6b/examples/http-client
 //
 
-const (
-	// We need one TCP port to make one HTTP request at a time.
-	tcpPortsCount = 1
-
-	// We need two UDP ports: one for DNS, one for DHCP.
-	udpPortsCount = 2
-
-	// Use the MTU for the WiFi device.
-	mtu = cyw43439.MTU
-)
+//
+// Public interface
+//
 
 var (
 	// WiFiNotReadyError is returned to indicate that an operation cannot be
@@ -171,11 +164,25 @@ func (pn *PicoNet) Status() PicoNetStatus {
 	return pn.status
 }
 
-func (pn *PicoNet) setStatus(s PicoNetStatus) {
-	pn.mutex.Lock()
-	defer pn.mutex.Unlock()
-	pn.status = s
+// TODO: What return type?!
+func (pn *PicoNet) Get() (result string, err error) {
+	return "", nil
 }
+
+//
+// Initialization
+//
+
+const (
+	// We need one TCP port to make one HTTP request at a time.
+	tcpPortsCount = 1
+
+	// We need two UDP ports: one for DNS, one for DHCP.
+	udpPortsCount = 2
+
+	// Use the MTU for the WiFi device.
+	mtu = cyw43439.MTU
+)
 
 func (pn *PicoNet) createDevice() {
 	for {
@@ -397,7 +404,17 @@ func (pn *PicoNet) obtainRouterMAC() {
 	}
 }
 
-func (pn *PicoNet) LookupNetIP(host string) ([]netip.Addr, error) {
+//
+// Helpers
+//
+
+func (pn *PicoNet) setStatus(s PicoNetStatus) {
+	pn.mutex.Lock()
+	defer pn.mutex.Unlock()
+	pn.status = s
+}
+
+func (pn *PicoNet) lookupNetIP(host string) ([]netip.Addr, error) {
 	name, err := dns.NewName(host)
 	if err != nil {
 		return nil, err
@@ -580,13 +597,13 @@ func (pn *PicoNet) getUsableAddress(urlStr string) (addrPort netip.AddrPort, hos
 
 	// The passed URL does not use an IP directly, so we need to make a DNS
 	// request.
-	addrs, err := pn.LookupNetIP(host)
+	addrs, err := pn.lookupNetIP(host)
 	if err != nil {
 		err = fmt.Errorf("resolving %q: %w", host, err)
 		return
 	}
 
-	// LookupNetIP will return an error if it can't get any IPv4 addresses, so
+	// lookupNetIP will return an error if it can't get any IPv4 addresses, so
 	// it's guaranteed that addrs[0] will contain something!
 	addrPort = netip.AddrPortFrom(addrs[0], uint16Port)
 
@@ -620,6 +637,10 @@ func resolveHardwareAddr(stack *stacks.PortStack, ip netip.Addr) ([6]byte, error
 	_, hw, err := arpClient.ResultAs6()
 	return hw, err
 }
+
+//
+// Trying things out
+//
 
 // TODO: Transform into Get() and Post() methods. Or something more generic than
 // that even.
