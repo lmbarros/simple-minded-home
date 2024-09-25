@@ -568,6 +568,10 @@ func resolveHardwareAddr(stack *stacks.PortStack, ip netip.Addr) ([6]byte, error
 
 // TODO: Too much hardcoded stuff here!
 func makeRequest(pn *PicoNet) {
+	const connTimeout = 5 * time.Second
+	const tcpBufSize = 2030                  // MTU - ethhdr - iphdr - tcphdr
+	const serverAddrStr = "93.184.215.14:80" // example.com
+
 	start := time.Now()
 
 	svAddr, err := netip.ParseAddrPort(serverAddrStr)
