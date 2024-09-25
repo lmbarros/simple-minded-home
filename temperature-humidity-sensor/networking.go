@@ -31,7 +31,7 @@ const (
 	// We need two UDP ports: one for DNS, one for DHCP.
 	udpPortsCount = 2
 
-	// Use the MTU for the Pi Pico W network device.
+	// Use the MTU for the WiFi device.
 	mtu = cyw43439.MTU
 )
 
@@ -91,7 +91,7 @@ type PicoNet struct {
 	// status tells how things are.
 	status PicoNetStatus
 
-	// Device is the Raspberry Pi Pico W WiFi device.
+	// device is the Raspberry Pi Pico W WiFi device.
 	device *cyw43439.Device
 
 	// stack is the network stack used internally.
@@ -153,10 +153,10 @@ func (pn *PicoNet) createDevice() {
 		startTime := time.Now()
 
 		// Create the Pico W device.
-		pn.logger.Info("Creating the Pi Pico W network device")
+		pn.logger.Info("Creating the WiFi device")
 		pn.device = cyw43439.NewPicoWDevice()
 		if pn.device == nil {
-			pn.logger.Error("Got a nil Pi Pico W network device")
+			pn.logger.Error("Got a nil WiFi device")
 
 			// I think that retrying here unlikely to succeed, but I also don't
 			// see much else we could do. Rebooting the device would not be a
@@ -165,7 +165,7 @@ func (pn *PicoNet) createDevice() {
 			continue
 		}
 
-		pn.logger.Info("Pi Pico W network device created successfully", slogTook(startTime))
+		pn.logger.Info("WiFi device created successfully", slogTook(startTime))
 		break
 	}
 
@@ -173,20 +173,20 @@ func (pn *PicoNet) createDevice() {
 		startTime := time.Now()
 
 		// Initialize the Pico W device.
-		pn.logger.Info("Initializing the Pi Pico W network device")
+		pn.logger.Info("Initializing the WiFi device")
 		wifiCfg := cyw43439.DefaultWifiConfig()
 		wifiCfg.Logger = pn.logger
 
 		err := pn.device.Init(wifiCfg)
 		if err != nil {
-			pn.logger.Error("Initializing the Pi Pico W network device", slog.String("err", err.Error()))
+			pn.logger.Error("Initializing the WiFi device", slog.String("err", err.Error()))
 			time.Sleep(5 * time.Second)
 			continue
 		}
 
 		pn.picoMAC, err = pn.device.HardwareAddr6()
 		if err != nil {
-			pn.logger.Error("Obtaining the Pi Pico W network device MAC address", slog.String("err", err.Error()))
+			pn.logger.Error("Obtaining the WiFi device MAC address", slog.String("err", err.Error()))
 			time.Sleep(5 * time.Second)
 			continue
 		}
