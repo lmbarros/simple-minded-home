@@ -10,9 +10,12 @@ Collection of projects I am using to add some slightly-dim brains to my home.
 
 * Temperature & Humidity sensor
     * Button to turn the display off and on.
+        * Probably will [want to use
+          interrupts](https://pragmatik.tech/gpio-and-interrupts-on-the-pico).
     * Consider updating only every minute, or maybe 5 minutes.
     * Check if I can get to some low-power state in between updates.
     * Send data somewhere.
+        * Alright, at least got the code to make HTTP requests in place!
 
 ### Reference
 

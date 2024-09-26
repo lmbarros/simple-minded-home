@@ -16,6 +16,18 @@ import (
 var pixelColor = color.RGBA{255, 255, 255, 255}
 
 func main() {
+	logger := createLogger()
+
+	// It seems that it takes a while until the serial console is ready to be
+	// written to. So we sleep for a while until we are sure that any subsequent
+	// logging operations will actually go down the wire.
+	time.Sleep(500 * time.Millisecond)
+
+	logger.Info("The device is alive!")
+
+	// TODO: Testing networking!
+	// pn := NewPicoNet(logger)
+
 	dht11 := dht.New(machine.GPIO15, dht.DHT11)
 
 	displayI2C := machine.I2C0
@@ -39,6 +51,9 @@ func main() {
 	display.ClearDisplay()
 
 	for {
+		// TODO: Testing networking!
+		// status := pn.Status()
+		// logger.Info("PicoNet status", slog.String("status", status.String()))
 		time.Sleep(5 * time.Second)
 
 		temperature, err := dht11.TemperatureFloat(dht.C)
@@ -68,6 +83,29 @@ func main() {
 		// tinyfont.WriteLine(&display, &tinyfont.TomThumb, 84, 40, "Debug text!", pixelColor)
 		// tinyfont.WriteLine(&display, &tinyfont.TomThumb, 84, 48, "More debug...", pixelColor)
 		// tinyfont.WriteLine(&display, &tinyfont.TomThumb, 84, 56, "n' then some.", pixelColor)
+
+		// TODO: Testing networking!
+		// tinyfont.WriteLine(&display, &tinyfont.TomThumb, 84, 40, string(status), pixelColor)
+
+		// TODO: Testing networking!
+		// if status == StatusReadyToGo {
+		// 	res, err := pn.Get("http://stackedboxes.org/2021/12/30/from-bare-docs-to-bare-metal/")
+		// 	if err != nil {
+		// 		logger.Warn("GET request failed", slogError(err))
+		// 		continue
+		// 	}
+
+		// 	logger.Info("GET RESPONSE!",
+		// 		slog.String("proto", res.Proto),
+		// 		slog.String("status", res.Status),
+		// 		slog.Int("contentLength", res.ContentLength),
+		// 		slog.Int("statusCode", res.StatusCode),
+		// 	)
+
+		// 	print(string(res.Body))
+
+		// 	logger.Info("THAT'S IT!")
+		// }
 
 		display.Display()
 	}
