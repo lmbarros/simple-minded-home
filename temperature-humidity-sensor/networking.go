@@ -84,8 +84,8 @@ func (s PicoNetStatus) String() string {
 	}
 }
 
-// PicoNet is *the* interface to do networking stuff on a Raspberry Pi Pico W --
-// at least on this humble program! :-)
+// PicoNet is *the* gargantuan interface to do networking stuff on a Raspberry
+// Pi Pico W -- at least on this humble program! :-)
 //
 // You should create just one of those. I mean, the code doesn't really check
 // how many instances do exist, and it may even work with multiple instances,
@@ -167,40 +167,23 @@ func (pn *PicoNet) Status() PicoNetStatus {
 }
 
 // Get does an HTTP GET request.
-func (pn *PicoNet) Get(urlStr string) (resp *Response, err error) {
+func (pn *PicoNet) Get(urlStr string) (res *Response, err error) {
 	rawRes, body, err := pn.doRequest("GET", urlStr, []byte{})
 	if err != nil {
 		return nil, err
 	}
 
-	// These mappings between `rawRes` and `res` look completely nuts, I know.
-	// It turns out that the low-level networking code I am using (the `seqs`
-	// library) seems to be in a very early stage of development, and therefore
-	// it can't properly parse HTTP responses. What I am doing in `doRequest()`
-	// is effectively to parse the HTTP response as if it were an HTTP request,
-	// and then reading the information I want from the request fields that by
-	// coincidence match the wanted response fields.
-	statusCode, err := strconv.ParseInt(string(rawRes.Hdr.RequestURI()), 10, 32)
-	if err != nil {
-		pn.logger.Warn("Parsing HTTP status code", slogError(err))
-		statusCode = 0
-	}
-
-	res := &Response{
-		Status:        string(rawRes.Hdr.RequestURI()) + " " + string(rawRes.Hdr.Protocol()),
-		StatusCode:    int(statusCode),
-		Proto:         string(rawRes.Hdr.Method()),
-		Headers:       rawRes.Hdr.GetAll(),
-		ContentLength: rawRes.Hdr.ContentLength(),
-		Body:          body,
-	}
-
-	return res, nil
+	return pn.translateHeaders(rawRes, body)
 }
 
-// xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-func (pn *PicoNet) Post() (resp *Response, err error) {
-	return nil, nil
+// Post does an HTTP POST request.
+func (pn *PicoNet) Post(urlStr string, body []byte) (resp *Response, err error) {
+	rawRes, body, err := pn.doRequest("POST", urlStr, body)
+	if err != nil {
+		return nil, err
+	}
+
+	return pn.translateHeaders(rawRes, body)
 }
 
 // Response is the response from an HTTP request. This ain't no standard http
@@ -706,13 +689,10 @@ func (pn *PicoNet) doRequest(method, urlStr string, reqBody []byte) (resHeader *
 	var req httpx.RequestHeader
 	req.SetRequestURI(path)
 
-	// xxxxxxxxxxxxxxxxxxx Handle body!
-	// If you need a Post request change "GET" to "POST" and then add the post
-	// data to reqBytes: `postReq := append(reqBytes, postData...)` and send
-	// postReq over TCP.
 	req.SetMethod(method)
 	req.SetHost(host)
 	reqBytes := req.Header()
+	reqBytes = append(reqBytes, resBody...)
 
 	pn.logger.Info("TCP connection ready, now dialing",
 		slog.String("clientAddr", clientAddr.String()),
@@ -734,24 +714,21 @@ func (pn *PicoNet) doRequest(method, urlStr string, reqBody []byte) (resHeader *
 		retries--
 	}
 
-	// xxxxxxxxxxxxx Disable the deadline when sending data?! I don't think I want to do that!
-	conn.SetDeadline(time.Time{}) // Disable the deadline.
 	if retries == 0 {
 		pn.logger.Error("Retry limit exceeded opening TCP connection")
 		return nil, nil, errors.New("retry limit exceeded opening TCP connection")
 	}
 
 	// Send the request.
+	conn.SetDeadline(time.Now().Add(3 * connTimeout))
 	_, err = conn.Write(reqBytes)
 	if err != nil {
 		pn.logger.Error("Writing request", slogError(err))
 		return nil, nil, fmt.Errorf("writing request: %w", err)
 	}
 
-	// xxxxxxxxxxxxxxx TODO: This Sleep() is fishy, right?
-	time.Sleep(500 * time.Millisecond)
+	// Read the response; first the headers...
 	conn.SetDeadline(time.Now().Add(connTimeout))
-
 	br := bufio.NewReader(conn)
 
 	resHeader = &httpx.ResponseHeader{}
@@ -761,8 +738,9 @@ func (pn *PicoNet) doRequest(method, urlStr string, reqBody []byte) (resHeader *
 		return nil, nil, fmt.Errorf("reading response: %w", err)
 	}
 
+	// ...then read the body.
 	resBody = make([]byte, resHeader.Hdr.ContentLength())
-	_, err = io.ReadFull(br, resBody) // xxxxxxxxxx check n?
+	_, err = io.ReadFull(br, resBody)
 	if err != nil {
 		pn.logger.Error("Reading response body", slogError(err))
 		return nil, nil, err
@@ -771,32 +749,27 @@ func (pn *PicoNet) doRequest(method, urlStr string, reqBody []byte) (resHeader *
 	return resHeader, resBody, nil
 }
 
-func (pn *PicoNet) translateHeaders(urlStr string) (resp *Response, err error) {
-	rawRes, body, err := pn.doRequest("GET", urlStr, []byte{})
-	if err != nil {
-		return nil, err
-	}
-
-	// These mappings between `rawRes` and `res` look completely nuts, I know.
+func (pn *PicoNet) translateHeaders(resHeader *httpx.ResponseHeader, resBody []byte) (resp *Response, err error) {
+	// These mappings between `resHeader` and `res` look completely nuts, I know.
 	// It turns out that the low-level networking code I am using (the `seqs`
 	// library) seems to be in a very early stage of development, and therefore
 	// it can't properly parse HTTP responses. What I am doing in `doRequest()`
 	// is effectively to parse the HTTP response as if it were an HTTP request,
 	// and then reading the information I want from the request fields that by
 	// coincidence match the wanted response fields.
-	statusCode, err := strconv.ParseInt(string(rawRes.Hdr.RequestURI()), 10, 32)
+	statusCode, err := strconv.ParseInt(string(resHeader.Hdr.RequestURI()), 10, 32)
 	if err != nil {
 		pn.logger.Warn("Parsing HTTP status code", slogError(err))
 		statusCode = 0
 	}
 
 	res := &Response{
-		Status:        string(rawRes.Hdr.RequestURI()) + " " + string(rawRes.Hdr.Protocol()),
+		Status:        string(resHeader.Hdr.RequestURI()) + " " + string(resHeader.Hdr.Protocol()),
 		StatusCode:    int(statusCode),
-		Proto:         string(rawRes.Hdr.Method()),
-		Headers:       rawRes.Hdr.GetAll(),
-		ContentLength: rawRes.Hdr.ContentLength(),
-		Body:          body,
+		Proto:         string(resHeader.Hdr.Method()),
+		Headers:       resHeader.Hdr.GetAll(),
+		ContentLength: resHeader.Hdr.ContentLength(),
+		Body:          resBody,
 	}
 
 	return res, nil
