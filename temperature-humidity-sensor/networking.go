@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math/rand"
 	"net"
@@ -164,9 +166,64 @@ func (pn *PicoNet) Status() PicoNetStatus {
 	return pn.status
 }
 
-// TODO: What return type?!
-func (pn *PicoNet) Get() (result string, err error) {
-	return "", nil
+// Get does an HTTP GET request.
+func (pn *PicoNet) Get(urlStr string) (resp *Response, err error) {
+	rawRes, body, err := pn.doRequest("GET", urlStr, []byte{})
+	if err != nil {
+		return nil, err
+	}
+
+	// These mappings between `rawRes` and `res` look completely nuts, I know.
+	// It turns out that the low-level networking code I am using (the `seqs`
+	// library) seems to be in a very early stage of development, and therefore
+	// it can't properly parse HTTP responses. What I am doing in `doRequest()`
+	// is effectively to parse the HTTP response as if it were an HTTP request,
+	// and then reading the information I want from the request fields that by
+	// coincidence match the wanted response fields.
+	statusCode, err := strconv.ParseInt(string(rawRes.Hdr.RequestURI()), 10, 32)
+	if err != nil {
+		pn.logger.Warn("Parsing HTTP status code", slogError(err))
+		statusCode = 0
+	}
+
+	res := &Response{
+		Status:        string(rawRes.Hdr.RequestURI()) + " " + string(rawRes.Hdr.Protocol()),
+		StatusCode:    int(statusCode),
+		Proto:         string(rawRes.Hdr.Method()),
+		Headers:       rawRes.Hdr.GetAll(),
+		ContentLength: rawRes.Hdr.ContentLength(),
+		Body:          body,
+	}
+
+	return res, nil
+}
+
+// xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+func (pn *PicoNet) Post() (resp *Response, err error) {
+	return nil, nil
+}
+
+// Response is the response from an HTTP request. This ain't no standard http
+// package, so don't expect super standard-respecting parsing of a response.
+// Just to give one example: this will not handle duplicate headers nicely.
+type Response struct {
+	// Status contains the response status, like "200 OK".
+	Status string
+
+	// StatusCode contains the status code, like 200.
+	StatusCode int
+
+	// Proto contains the protocol version, like "HTTP/1.0".
+	Proto string
+
+	// Headers maps header keys to their values.
+	Headers map[string]string
+
+	// Body contains the response body.
+	Body []byte
+
+	// ContentLength contains the length of the associated content.
+	ContentLength int
 }
 
 //
@@ -610,6 +667,141 @@ func (pn *PicoNet) getUsableAddress(urlStr string) (addrPort netip.AddrPort, hos
 	return
 }
 
+func (pn *PicoNet) doRequest(method, urlStr string, reqBody []byte) (resHeader *httpx.ResponseHeader, resBody []byte, err error) {
+	const connTimeout = 5 * time.Second
+	const tcpBufSize = 2030 // MTU - ethhdr - iphdr - tcphdr
+
+	addrPort, host, path, err := pn.getUsableAddress(urlStr)
+	if err != nil {
+		pn.logger.Error("Preparing request", slogError(err))
+		return nil, nil, err
+	}
+
+	// Create the TCP connection, set this up so it gets closed eventually.
+	clientAddr := netip.AddrPortFrom(pn.stack.Addr(), uint16(rand.Intn(65535-1024)+1024))
+	conn, err := stacks.NewTCPConn(pn.stack, stacks.TCPConnConfig{
+		TxBufSize: tcpBufSize,
+		RxBufSize: tcpBufSize,
+	})
+
+	if err != nil {
+		panic("conn create:" + err.Error())
+	}
+
+	defer func() {
+		err := conn.Close()
+		if err != nil {
+			pn.logger.Error("Closing TCP connection", slogError(err))
+			return
+		}
+		for !conn.State().IsClosed() {
+			pn.logger.Info("Waiting for TCP connection to close", slog.String("state", conn.State().String()))
+			time.Sleep(1000 * time.Millisecond)
+		}
+		pn.logger.Info("TCP connection closed")
+	}()
+
+	// Here we create the HTTP request and generate the bytes. The Header method
+	// returns the raw header bytes as should be sent over the wire.
+	var req httpx.RequestHeader
+	req.SetRequestURI(path)
+
+	// xxxxxxxxxxxxxxxxxxx Handle body!
+	// If you need a Post request change "GET" to "POST" and then add the post
+	// data to reqBytes: `postReq := append(reqBytes, postData...)` and send
+	// postReq over TCP.
+	req.SetMethod(method)
+	req.SetHost(host)
+	reqBytes := req.Header()
+
+	pn.logger.Info("TCP connection ready, now dialing",
+		slog.String("clientAddr", clientAddr.String()),
+		slog.String("serverAddr", urlStr),
+		slog.String("serverIPPort", addrPort.String()),
+	)
+
+	// Make sure to timeout the connection if it takes too long.
+	conn.SetDeadline(time.Now().Add(connTimeout))
+	err = conn.OpenDialTCP(clientAddr.Port(), pn.routerMAC, addrPort, seqs.Value(rand.Intn(65535-1024)+1024))
+	if err != nil {
+		pn.logger.Error("Opening TCP connection", slogError(err))
+		return nil, nil, fmt.Errorf("opening TCP connection: %w", err)
+	}
+
+	retries := 50
+	for conn.State() != seqs.StateEstablished && retries > 0 {
+		time.Sleep(100 * time.Millisecond)
+		retries--
+	}
+
+	// xxxxxxxxxxxxx Disable the deadline when sending data?! I don't think I want to do that!
+	conn.SetDeadline(time.Time{}) // Disable the deadline.
+	if retries == 0 {
+		pn.logger.Error("Retry limit exceeded opening TCP connection")
+		return nil, nil, errors.New("retry limit exceeded opening TCP connection")
+	}
+
+	// Send the request.
+	_, err = conn.Write(reqBytes)
+	if err != nil {
+		pn.logger.Error("Writing request", slogError(err))
+		return nil, nil, fmt.Errorf("writing request: %w", err)
+	}
+
+	// xxxxxxxxxxxxxxx TODO: This Sleep() is fishy, right?
+	time.Sleep(500 * time.Millisecond)
+	conn.SetDeadline(time.Now().Add(connTimeout))
+
+	br := bufio.NewReader(conn)
+
+	resHeader = &httpx.ResponseHeader{}
+	err = resHeader.Hdr.Read(br)
+	if err != nil {
+		pn.logger.Error("Reading response", slogError(err))
+		return nil, nil, fmt.Errorf("reading response: %w", err)
+	}
+
+	resBody = make([]byte, resHeader.Hdr.ContentLength())
+	_, err = io.ReadFull(br, resBody) // xxxxxxxxxx check n?
+	if err != nil {
+		pn.logger.Error("Reading response body", slogError(err))
+		return nil, nil, err
+	}
+
+	return resHeader, resBody, nil
+}
+
+func (pn *PicoNet) translateHeaders(urlStr string) (resp *Response, err error) {
+	rawRes, body, err := pn.doRequest("GET", urlStr, []byte{})
+	if err != nil {
+		return nil, err
+	}
+
+	// These mappings between `rawRes` and `res` look completely nuts, I know.
+	// It turns out that the low-level networking code I am using (the `seqs`
+	// library) seems to be in a very early stage of development, and therefore
+	// it can't properly parse HTTP responses. What I am doing in `doRequest()`
+	// is effectively to parse the HTTP response as if it were an HTTP request,
+	// and then reading the information I want from the request fields that by
+	// coincidence match the wanted response fields.
+	statusCode, err := strconv.ParseInt(string(rawRes.Hdr.RequestURI()), 10, 32)
+	if err != nil {
+		pn.logger.Warn("Parsing HTTP status code", slogError(err))
+		statusCode = 0
+	}
+
+	res := &Response{
+		Status:        string(rawRes.Hdr.RequestURI()) + " " + string(rawRes.Hdr.Protocol()),
+		StatusCode:    int(statusCode),
+		Proto:         string(rawRes.Hdr.Method()),
+		Headers:       rawRes.Hdr.GetAll(),
+		ContentLength: rawRes.Hdr.ContentLength(),
+		Body:          body,
+	}
+
+	return res, nil
+}
+
 // resolveHardwareAddr obtains the hardware address of the given IP address.
 func resolveHardwareAddr(stack *stacks.PortStack, ip netip.Addr) ([6]byte, error) {
 	if !ip.IsValid() {
@@ -639,110 +831,8 @@ func resolveHardwareAddr(stack *stacks.PortStack, ip netip.Addr) ([6]byte, error
 }
 
 //
-// Trying things out
+// Logging helpers
 //
-
-// TODO: Transform into Get() and Post() methods. Or something more generic than
-// that even.
-func (pn *PicoNet) makeRequest(urlStr string) {
-	const connTimeout = 5 * time.Second
-	const tcpBufSize = 2030 // MTU - ethhdr - iphdr - tcphdr
-
-	start := time.Now()
-
-	addrPort, host, path, err := pn.getUsableAddress(urlStr)
-	if err != nil {
-		pn.logger.Error("Making request", slogError(err))
-	}
-
-	rng := rand.New(rand.NewSource(int64(time.Now().Sub(start))))
-
-	// Start TCP server.
-	clientAddr := netip.AddrPortFrom(pn.stack.Addr(), uint16(rng.Intn(65535-1024)+1024))
-	conn, err := stacks.NewTCPConn(pn.stack, stacks.TCPConnConfig{
-		TxBufSize: tcpBufSize,
-		RxBufSize: tcpBufSize,
-	})
-
-	if err != nil {
-		panic("conn create:" + err.Error())
-	}
-
-	closeConn := func(err string) {
-		slog.Error("tcpconn:closing", slog.String("err", err))
-		conn.Close()
-		for !conn.State().IsClosed() {
-			slog.Info("tcpconn:waiting", slog.String("state", conn.State().String()))
-			time.Sleep(1000 * time.Millisecond)
-		}
-	}
-
-	// Here we create the HTTP request and generate the bytes. The Header method
-	// returns the raw header bytes as should be sent over the wire.
-	var req httpx.RequestHeader
-	req.SetRequestURI(path)
-
-	// If you need a Post request change "GET" to "POST" and then add the
-	// post data to reqBytes: `postReq := append(reqBytes, postData...)` and send postReq over TCP.
-	req.SetMethod("GET")
-	req.SetHost(addrPort.Addr().String())
-	req.SetHost(host)
-	reqBytes := req.Header()
-
-	pn.logger.Info("tcp:ready",
-		slog.String("clientAddr", clientAddr.String()),
-		slog.String("serverAddr", urlStr),
-	)
-	rxBuf := make([]byte, 1024*10)
-	for {
-		time.Sleep(5 * time.Second)
-		slog.Info("dialing", slog.String("serverAddr", addrPort.String()))
-
-		// Make sure to timeout the connection if it takes too long.
-		conn.SetDeadline(time.Now().Add(connTimeout))
-		err = conn.OpenDialTCP(clientAddr.Port(), pn.routerMAC, addrPort, seqs.Value(rng.Intn(65535-1024)+1024))
-		if err != nil {
-			closeConn("opening TCP: " + err.Error())
-			continue
-		}
-		slog.Info("LMB: Opened connection!")
-		retries := 50
-		for conn.State() != seqs.StateEstablished && retries > 0 {
-			time.Sleep(100 * time.Millisecond)
-			retries--
-		}
-		slog.Info("LMB: Disabling deadline!")
-		conn.SetDeadline(time.Time{}) // Disable the deadline.
-		if retries == 0 {
-			closeConn("tcp establish retry limit exceeded")
-			continue
-		}
-
-		// Send the request.
-		slog.Info("LMB: Sending the request!")
-		_, err = conn.Write(reqBytes)
-		if err != nil {
-			closeConn("writing request: " + err.Error())
-			continue
-		}
-		slog.Info("LMB: Sleep 1111111!")
-		time.Sleep(500 * time.Millisecond)
-		conn.SetDeadline(time.Now().Add(connTimeout))
-		slog.Info("LMB: Reading response")
-		n, err := conn.Read(rxBuf)
-		if n == 0 && err != nil {
-			closeConn("reading response: " + err.Error())
-			continue
-		} else if n == 0 {
-			closeConn("no response")
-			continue
-		}
-		println("got HTTP response!")
-		println(string(rxBuf[:n]))
-		closeConn("done")
-		return // exit program.
-	}
-}
 
 func slogTook(start time.Time) slog.Attr {
 	return slog.Duration("took", time.Since(start))

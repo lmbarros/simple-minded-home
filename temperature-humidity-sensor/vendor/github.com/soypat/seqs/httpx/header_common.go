@@ -45,6 +45,26 @@ func (h *header) Set(key, value string) {
 	h.SetCanonical(b2s(h.bufKV.key), value)
 }
 
+func (h *header) Get(key string) (string, bool) {
+	for _, kv := range h.h {
+		if strings.EqualFold(string(kv.key), key) {
+			return string(kv.value), true
+		}
+	}
+
+	return "", false
+}
+
+func (h *header) GetAll() map[string]string {
+	res := map[string]string{}
+
+	for _, kv := range h.h {
+		res[string(kv.key)] = string(kv.value)
+	}
+
+	return res
+}
+
 func (h *header) Add(key, value string) {
 	if h.setSpecialHeader(key, value) {
 		return

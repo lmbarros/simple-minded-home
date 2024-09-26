@@ -87,7 +87,22 @@ func main() {
 		// tinyfont.WriteLine(&display, &tinyfont.TomThumb, 84, 56, "n' then some.", pixelColor)
 		tinyfont.WriteLine(&display, &tinyfont.TomThumb, 84, 40, string(status), pixelColor)
 		if status == StatusReadyToGo {
-			pn.makeRequest("http://stackedboxes.org/2021/12/30/from-bare-docs-to-bare-metal/")
+			res, err := pn.Get("http://stackedboxes.org/2021/12/30/from-bare-docs-to-bare-metal/")
+			if err != nil {
+				logger.Warn("GET request failed", slogError(err))
+				continue
+			}
+
+			logger.Info("GET RESPONSE!",
+				slog.String("proto", res.Proto),
+				slog.String("status", res.Status),
+				slog.Int("contentLength", res.ContentLength),
+				slog.Int("statusCode", res.StatusCode),
+			)
+
+			print(string(res.Body))
+
+			logger.Info("THAT'S IT!")
 		}
 
 		display.Display()

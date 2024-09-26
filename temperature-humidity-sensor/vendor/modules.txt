@@ -5,7 +5,7 @@ github.com/google/shlex
 ## explicit; go 1.20
 github.com/soypat/cyw43439
 github.com/soypat/cyw43439/whd
-# github.com/soypat/seqs v0.0.0-20240527012110-1201bab640ef
+# github.com/soypat/seqs v0.0.0-20240527012110-1201bab640ef => github.com/lmbarros/seqs v0.0.0-20240926163717-fa870a09d078
 ## explicit; go 1.20
 github.com/soypat/seqs
 github.com/soypat/seqs/eth
