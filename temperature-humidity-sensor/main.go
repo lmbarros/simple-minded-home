@@ -28,12 +28,12 @@ func main() {
 	// TODO: Testing networking!
 	// pn := NewPicoNet(logger)
 
-	dht11 := dht.New(machine.GPIO15, dht.DHT11)
+	dht11 := dht.New(machine.GPIO21, dht.DHT11)
 
-	displayI2C := machine.I2C0
+	displayI2C := machine.I2C1
 	err := displayI2C.Configure(machine.I2CConfig{
-		SCL:       machine.GPIO1,
-		SDA:       machine.GPIO0,
+		SCL:       machine.GPIO11,
+		SDA:       machine.GPIO10,
 		Frequency: 400 * machine.KHz,
 	})
 	if err != nil {
