@@ -154,15 +154,9 @@ func turnDisplayOnOff(d ssd1306.Device, on bool) {
 // sensorUpdateLoop is an infinite loop updating the sensor readings every so
 // often. Meant to run in a separate goroutine.
 func sensorUpdateLoop(d dht.Device, logger *slog.Logger) {
-	readingInterval := 5 * time.Second
-	timeOfNextReading := time.Time{}
+	chTick := time.Tick(5 * time.Second)
 
 	for {
-		now := time.Now()
-		delay := timeOfNextReading.Sub(now)
-		timeOfNextReading = now.Add(readingInterval)
-		time.Sleep(delay)
-
 		t, err := d.TemperatureFloat(dht.C)
 		if err != nil {
 			logger.Warn("Reading temperature", slogError(err))
@@ -176,6 +170,8 @@ func sensorUpdateLoop(d dht.Device, logger *slog.Logger) {
 		muReadings.Lock()
 		temperature, humidity = t, h
 		muReadings.Unlock()
+
+		<-chTick
 	}
 }
 
