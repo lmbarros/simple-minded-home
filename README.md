@@ -4,15 +4,17 @@ Not smart, but nor really dumb either.
 
 Collection of projects I am using to add some slightly-dim brains to my home.
 
+## Hardware
+
+I'm using a 0.01µF (labeled "103") ceramic capacitor in parallel with my switch
+to debounce it, and it seems to work well-enough. A 0.1µF one (labeled "104")
+also seems to do fine, for that matter.
+
 ## Notes to self
 
 ### TODO
 
 * Temperature & Humidity sensor
-    * Button to turn the display off and on.
-        * Probably will [want to use
-          interrupts](https://pragmatik.tech/gpio-and-interrupts-on-the-pico).
-    * Consider updating only every minute, or maybe 5 minutes.
     * Check if I can get to some low-power state in between updates.
     * Send data somewhere.
         * Alright, at least got the code to make HTTP requests in place!
