@@ -11,6 +11,7 @@ import (
 
 	"tinygo.org/x/drivers/dht"
 	"tinygo.org/x/drivers/ssd1306"
+	"tinygo.org/x/tinyfont"
 )
 
 // pixelColor is the color we use when drawing things. We use a 1-bit display,
@@ -55,13 +56,18 @@ func main() {
 
 	for {
 		select {
-		case <-chClick:
+		case d := <-chClick:
+			if d.Seconds() > 4.0 {
+				resetDevice(display, logger)
+			}
+
 			displayOn = !displayOn
 			turnDisplayOnOff(display, displayOn)
 		case <-chTicker:
 			if displayOn {
 				updateDisplay(display)
 			}
+		}
 
 		// TODO: Testing networking!
 		// status := pn.Status()
@@ -204,6 +210,16 @@ func initButton() (chClick chan time.Duration, chDown chan time.Time) {
 		})
 
 	return chClick, chDown
+}
+
+func resetDevice(display ssd1306.Device, logger *slog.Logger) {
+	logger.Info("Reset requested")
+	display.ClearBuffer()
+	tinyfont.WriteLine(&display, &tinyfont.TomThumb, 40, 32, "Reseting...", pixelColor)
+	display.Display()
+	time.Sleep(3 * time.Second)
+	logger.Info("Reseting now")
+	machine.CPUReset()
 }
 
 func initDisplay() (ssd1306.Device, error) {
