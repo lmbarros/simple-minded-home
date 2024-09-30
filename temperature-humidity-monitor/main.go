@@ -27,6 +27,12 @@ var humidity float32
 // muReadings is the mutex protecting `temperature` and `humidity`.
 var muReadings sync.Mutex
 
+// muGPIO is the mutex used tos serialize access to the GPIO pins on the Pi Pico
+// W. I was getting some random timing I2C errors when running the program for a
+// while, which I strongly believe were caused by the display and the DHT22
+// sensor accessing the I2C interface simultaneously from different goroutines.
+var muGPIO sync.Mutex
+
 func main() {
 	logger := createLogger()
 
@@ -65,7 +71,7 @@ func main() {
 			turnDisplayOnOff(display, displayOn)
 		case <-chTicker:
 			if displayOn {
-				updateDisplay(display)
+				updateDisplay(display, logger)
 			}
 		}
 
@@ -119,7 +125,7 @@ func displayText(display ssd1306.Device, text string, x, y int16) {
 	}
 }
 
-func updateDisplay(d ssd1306.Device) {
+func updateDisplay(d ssd1306.Device, logger *slog.Logger) {
 	var t float32
 	var h float32
 
@@ -131,8 +137,10 @@ func updateDisplay(d ssd1306.Device) {
 	textTemperature := fmt.Sprintf("🌡️%.1f°C", t)
 	textHumidity := fmt.Sprintf("💧%.0f%%", h)
 
+	muGPIO.Lock()
+	defer muGPIO.Unlock()
+
 	d.ClearBuffer()
-	defer d.Display()
 
 	displayText(d, textTemperature, 0, 0)
 	displayText(d, textHumidity, 0, 32)
@@ -149,6 +157,19 @@ func updateDisplay(d ssd1306.Device) {
 	// TODO: Testing networking!
 	// tinyfont.WriteLine(&display, &tinyfont.TomThumb, 84, 40, string(status), pixelColor)
 
+	err := d.Display()
+	if err != nil {
+		logger.Warn("Updating the display", slogError(err))
+
+		// Rebooting the device after a display issue may be a bit drastic, but
+		// should be the most robust course of action I can take.
+		//
+		// The Sleep() is to make sure the log has enough time to be sent down
+		// the serial port before the device resets. A much shorter sleep would
+		// probably work, too.
+		time.Sleep(5 * time.Second)
+		machine.CPUReset()
+	}
 }
 
 func turnDisplayOnOff(d ssd1306.Device, on bool) {
@@ -161,6 +182,7 @@ func sensorUpdateLoop(d dht.Device, logger *slog.Logger) {
 	chTick := time.Tick(5 * time.Second)
 
 	for {
+		muGPIO.Lock()
 		t, err := d.TemperatureFloat(dht.C)
 		if err != nil {
 			logger.Warn("Reading temperature", slogError(err))
@@ -170,6 +192,7 @@ func sensorUpdateLoop(d dht.Device, logger *slog.Logger) {
 		if err != nil {
 			logger.Warn("Reading humidity", slogError(err))
 		}
+		muGPIO.Unlock()
 
 		muReadings.Lock()
 		temperature, humidity = t, h
