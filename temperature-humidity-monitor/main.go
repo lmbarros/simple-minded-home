@@ -41,7 +41,7 @@ func main() {
 	// pn := NewPicoNet(logger)
 
 	chClick, _ := initButton()
-	dht11 := dht.New(machine.GPIO21, dht.DHT11)
+	dht22 := dht.New(machine.GPIO21, dht.DHT22)
 	display, err := initDisplay()
 	if err != nil {
 		// Warn, but keep running without the display; hopefully we'll still be
@@ -49,7 +49,7 @@ func main() {
 		logger.Warn("Initializing the display", slogError(err))
 	}
 
-	go sensorUpdateLoop(dht11, logger)
+	go sensorUpdateLoop(dht22, logger)
 
 	chTicker := time.Tick(5 * time.Second)
 	displayOn := true
@@ -141,8 +141,6 @@ func updateDisplay(d ssd1306.Device) {
 	// usable for printing small error messages. If the air humidity gets to
 	// 100%, there will be some overlap, so ideally debug messages should be
 	// really short and aligned to the right hand side side of the screen.
-	// (By teh way, the DHT11 will never get to 100% humidity, but we may
-	// get there when upgrading to a DHT22.)
 	//
 	// tinyfont.WriteLine(&display, &tinyfont.TomThumb, 84, 40, "Debug text!", pixelColor)
 	// tinyfont.WriteLine(&display, &tinyfont.TomThumb, 84, 48, "More debug...", pixelColor)
