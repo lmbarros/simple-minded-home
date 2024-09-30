@@ -4,6 +4,11 @@ Not smart, but nor really dumb either.
 
 Collection of projects I am using to add some slightly-dim brains to my home.
 
+* [Temperature and Humidity monitor](./temperature-humidity-monitor)
+
+And as you can see my collection of projects is currently comprised of exactly
+one project!
+
 ## Reference
 
 * `sudo ~/bin/tinygo/bin/tinygo flash -target=pico -stack-size=8kb -monitor ./examples/blinky`
