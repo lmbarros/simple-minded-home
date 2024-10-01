@@ -16,3 +16,8 @@ Some notable slicing settings I used:
 
 * Infill Density: 25%
 * Extra Infill Wall Count: 3 [for thicker walls around the insertion screws]
+
+### TODO
+
+* Use M2.5 screw for the DHT22
+* Review and adjust margins for the lid. It's not fitting super nicely.
