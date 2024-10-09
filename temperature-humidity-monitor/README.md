@@ -16,8 +16,7 @@ Some notable slicing settings I used:
 
 * Infill Density: 25%
 * Extra Infill Wall Count: 3 [for thicker walls around the insertion screws]
-
-### TODO
-
-* Use M2.5 screw for the DHT22
-* Review and adjust margins for the lid. It's not fitting super nicely.
+* In the first case I printed, I force-added supports under the "pillars" that
+  hold the display. For the second print I didn't, and it still worked very
+  well. (Those are on a 45° angle, which everyone says is fine -- now I
+  believe everyone!)
