@@ -1,0 +1,34 @@
+# github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
+## explicit; go 1.13
+github.com/google/shlex
+# github.com/soypat/cyw43439 v0.0.0-20240627234239-a62ee4027d66
+## explicit; go 1.20
+github.com/soypat/cyw43439
+github.com/soypat/cyw43439/whd
+# github.com/soypat/seqs v0.0.0-20240527012110-1201bab640ef => github.com/lmbarros/seqs v0.0.0-20240926163717-fa870a09d078
+## explicit; go 1.20
+github.com/soypat/seqs
+github.com/soypat/seqs/eth
+github.com/soypat/seqs/eth/dhcp
+github.com/soypat/seqs/eth/dns
+github.com/soypat/seqs/eth/ntp
+github.com/soypat/seqs/httpx
+github.com/soypat/seqs/internal
+github.com/soypat/seqs/stacks
+# github.com/tinygo-org/pio v0.0.0-20231216154340-cd888eb58899
+## explicit; go 1.19
+github.com/tinygo-org/pio/rp2-pio
+github.com/tinygo-org/pio/rp2-pio/piolib
+# golang.org/x/exp v0.0.0-20230728194245-b0cb94b80691
+## explicit; go 1.20
+golang.org/x/exp/constraints
+# tinygo.org/x/drivers v0.28.0
+## explicit; go 1.18
+tinygo.org/x/drivers
+tinygo.org/x/drivers/dht
+tinygo.org/x/drivers/internal/legacy
+tinygo.org/x/drivers/pixel
+tinygo.org/x/drivers/ssd1306
+# tinygo.org/x/tinyfont v0.3.0
+## explicit; go 1.17
+tinygo.org/x/tinyfont
