@@ -12,6 +12,14 @@ also seems to do fine, for that matter.
 
 [Design in OnShape](https://cad.onshape.com/documents/e987645894743680e4f71a9c/w/7ab77c4f7e5b5df48522bfbd/e/d8782f551b3195f70bd8c6d7).
 
+![The case still in the 3D printer](./case/01-out-of-the-printer.jpg "The case still in the 3D printer.")
+
+![Starting the assembly](./case/02-assembling-wire-wrap.jpg "Starting the assembly. Using wire wrapping instead of soldering, with my very OK wire wrapping tool. The spaces are very tight, and I have melted some bits of the case while placing the threaded inserts for the Pi Pico. Now, thinking of it, I guess I could have fixed the display directly on the lid to simplify the design and ease the assembly. Not sure it would fit there, though.")
+
+![Assembly almost complete.](./case/03-assembling-almost-there.jpg "Assembly almost complete. The button fits tightly in place and doesn't need glue to stay there. Note de tiny ceramic capacitor for debouncing(this one is soldered, by the way).")
+
+![The final thing, assembled and working](./case/04-working.jpg "The final thing, assembled and working.")
+
 Some notable slicing settings I used:
 
 * Infill Density: 25%
