@@ -1,0 +1,10 @@
+#
+# Environmental Data Server (SMH)
+#
+
+name: Environmental Data Server (SMH)
+type: sw.application
+version: 0.0.1
+description: >-
+  A little server aggregating and serving environmental data. Part of my
+  Simple-Minded Home project.

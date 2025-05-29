@@ -1,0 +1,13 @@
+#
+# Environmental Data Server (SMH)
+#
+
+version: '2'
+
+services:
+  env-server:
+    build: .
+    volumes:
+      - env-server-data:/mnt/data
+volumes:
+    env-server-data:
