@@ -75,18 +75,13 @@ struct LocationInput {
 async fn put_location(
     mut db: Connection<EnvServerDb>,
     input: Json<LocationInput>,
-) -> Option<String> {
-    let success = sqlx::query(INSERT_LOCATION_SQL)
+) -> Result<String, Status> {
+    sqlx::query(INSERT_LOCATION_SQL)
         .bind(&input.location)
         .execute(&mut **db)
         .await
-        .is_ok();
-
-    if success {
-        Some("Ok".to_string())
-    } else {
-        None
-    }
+        .map(|_| "Ok".to_string())
+        .map_err(|_| Status::InternalServerError)
 }
 
 /// Input data passed to queries dealing with sensors.
@@ -98,18 +93,16 @@ struct SensorInput {
 
 /// Creates a new sensor entry in the database.
 #[put("/sensor", data = "<input>")]
-async fn put_sensor(mut db: Connection<EnvServerDb>, input: Json<SensorInput>) -> Option<String> {
-    let success = sqlx::query(INSERT_SENSOR_SQL)
+async fn put_sensor(
+    mut db: Connection<EnvServerDb>,
+    input: Json<SensorInput>,
+) -> Result<String, Status> {
+    sqlx::query(INSERT_SENSOR_SQL)
         .bind(&input.sensor)
         .execute(&mut **db)
         .await
-        .is_ok();
-
-    if success {
-        Some("Ok".to_string())
-    } else {
-        None
-    }
+        .map(|_| "Ok".to_string())
+        .map_err(|_| Status::InternalServerError)
 }
 
 /// Input data needed to create a data sample.
@@ -124,24 +117,26 @@ struct CreateDataInput {
 
 /// Creates a new data sample entry in the database.
 #[put("/data", data = "<input>")]
-async fn put_data(mut db: Connection<EnvServerDb>, input: Json<CreateDataInput>) -> Option<String> {
-    let location_id = id_from_location(&mut db, &input.location).await?;
-    let sensor_id = id_from_sensor(&mut db, &input.sensor).await?;
+async fn put_data(
+    mut db: Connection<EnvServerDb>,
+    input: Json<CreateDataInput>,
+) -> Result<String, Status> {
+    let location_id = id_from_location(&mut db, &input.location)
+        .await
+        .ok_or(Status::BadRequest)?;
+    let sensor_id = id_from_sensor(&mut db, &input.sensor)
+        .await
+        .ok_or(Status::BadRequest)?;
 
-    let success = sqlx::query(INSERT_DATA_SQL)
+    sqlx::query(INSERT_DATA_SQL)
         .bind(input.unix_timestamp)
         .bind(location_id)
         .bind(sensor_id)
         .bind(input.value)
         .execute(&mut **db)
         .await
-        .is_ok();
-
-    if success {
-        Some("Ok".to_string())
-    } else {
-        None
-    }
+        .map(|_| "Ok".to_string())
+        .map_err(|_| Status::InternalServerError)
 }
 
 /// Input data needed to query data.
@@ -209,18 +204,15 @@ async fn get_data(
         _ => select_data_sql("%Y-01-01T00:00:00Z"),
     };
 
-    let result = sqlx::query_as::<_, Measurement>(&sql)
+    sqlx::query_as::<_, Measurement>(&sql)
         .bind(input.unix_timestamp_from)
         .bind(input.unix_timestamp_to)
         .bind(sensor_id)
         .bind(location_id)
         .fetch_all(&mut **db)
-        .await;
-
-    match result {
-        Ok(measurements) => Ok(Json(measurements)),
-        Err(_) => Err(Status::InternalServerError),
-    }
+        .await
+        .map(|measurements| Json(measurements))
+        .map_err(|_| Status::InternalServerError)
 }
 
 //
