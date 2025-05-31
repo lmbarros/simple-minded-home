@@ -1,0 +1,2 @@
+[default.databases.env_server_db]
+url = "./env-server.sqlite"

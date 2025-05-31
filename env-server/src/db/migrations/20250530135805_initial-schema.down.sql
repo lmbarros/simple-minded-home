@@ -1,0 +1,7 @@
+DROP INDEX IF EXISTS main_data_index;
+
+DROP TABLE IF EXISTS data;
+
+DROP TABLE IF EXISTS sensors;
+
+DROP TABLE IF EXISTS locations;

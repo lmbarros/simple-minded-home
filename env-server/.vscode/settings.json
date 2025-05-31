@@ -1,6 +1,7 @@
 {
 	"cSpell.words": [
 		"chrono",
-		"sqlite"
+		"sqlite",
+		"sqlx"
 	]
 }
