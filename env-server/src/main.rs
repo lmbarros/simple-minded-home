@@ -10,10 +10,13 @@ use queries::*;
 extern crate rocket;
 
 use rocket::fairing::AdHoc;
+use rocket::http::Status;
 use rocket::serde::{Deserialize, json::Json};
 use rocket::{Build, Rocket, fairing};
 use rocket_db_pools::sqlx::{self};
 use rocket_db_pools::{Connection, Database};
+use serde::Serialize;
+use sqlx::prelude::FromRow;
 
 //
 // Rocket initialization
@@ -26,7 +29,10 @@ fn rocket() -> _ {
         .attach(EnvServerDb::init())
         .attach(migrations_fairing)
         .mount("/", routes![index])
-        .mount("/api/v0", routes![put_location, put_sensor, put_data])
+        .mount(
+            "/api/v0",
+            routes![get_data, put_location, put_sensor, put_data],
+        )
 }
 
 //
@@ -106,7 +112,7 @@ async fn put_sensor(mut db: Connection<EnvServerDb>, input: Json<SensorInput>) -
     }
 }
 
-/// Input data needed to a data sample.
+/// Input data needed to create a data sample.
 #[derive(Deserialize)]
 #[serde(crate = "rocket::serde")]
 struct CreateDataInput {
@@ -135,6 +141,85 @@ async fn put_data(mut db: Connection<EnvServerDb>, input: Json<CreateDataInput>)
         Some("Ok".to_string())
     } else {
         None
+    }
+}
+
+/// Input data needed to query data.
+#[derive(Deserialize)]
+#[serde(crate = "rocket::serde")]
+struct QueryDataInput {
+    unix_timestamp_from: i64,
+    unix_timestamp_to: i64,
+    location: String,
+    sensor: String,
+}
+
+#[derive(Serialize, FromRow)]
+#[serde(crate = "rocket::serde")]
+struct Measurement {
+    ts: String,
+    value: f64,
+}
+
+/// Gets data samples for a given sensor and location combination, for a given
+/// time interval.
+///
+/// Depending on the interval select, the returned data samples will be the
+/// average of some interval (like an hour, or a day, or even a year if the
+/// interval is really long).
+#[post("/get_data", data = "<input>")]
+async fn get_data(
+    mut db: Connection<EnvServerDb>,
+    input: Json<QueryDataInput>,
+) -> Result<Json<Vec<Measurement>>, Status> {
+    const DAY: i64 = 24 * 60 * 60;
+    const YEAR: i64 = 365 * DAY;
+
+    // Let's say that we want to return at most around 1000 samples to any given
+    // request. And let's assume our sensors send a sample every 5 minutes, or
+    // 12 samples per hour (love me some hardcoded assumptions 🤪!). So, we can
+    // serve about 3.5 days worth of "raw", unaggregated data.
+    const UNGROUPED_LIMIT: i64 = (DAY as f64 * 3.5) as i64;
+
+    // Aggregating by hour, we can serve about 40 days of data an be within our
+    // self-imposed limit of ~1000 data samples.
+    const GROUP_BY_HOUR_LIMIT: i64 = DAY * 40;
+
+    // Aggregating by day, we can serve some 2.7 years of data.
+    const GROUP_BY_DAY_LIMIT: i64 = (YEAR as f64 * 2.7) as i64;
+
+    // Aggregating by month, we can serve 1000 months, or 83 years. (I guess
+    // I'll never need to go beyond that, but we'd group by year after this.)
+    const GROUP_BY_MONTH_LIMIT: i64 = YEAR * 83;
+
+    let location_id = id_from_location(&mut db, &input.location)
+        .await
+        .ok_or(Status::BadRequest)?;
+    let sensor_id = id_from_sensor(&mut db, &input.sensor)
+        .await
+        .ok_or(Status::BadRequest)?;
+
+    let interval_secs = input.unix_timestamp_to - input.unix_timestamp_from;
+    let sql = match interval_secs {
+        ..1 => return Err(Status::BadRequest),
+        1..UNGROUPED_LIMIT => select_data_sql("%Y-%m-%dT%H:%M:%SZ"),
+        UNGROUPED_LIMIT..GROUP_BY_HOUR_LIMIT => select_data_sql("%Y-%m-%dT%H:00:00Z"),
+        GROUP_BY_HOUR_LIMIT..GROUP_BY_DAY_LIMIT => select_data_sql("%Y-%m-%dT00:00:00Z"),
+        GROUP_BY_DAY_LIMIT..GROUP_BY_MONTH_LIMIT => select_data_sql("%Y-%m-01T00:00:00Z"),
+        _ => select_data_sql("%Y-01-01T00:00:00Z"),
+    };
+
+    let result = sqlx::query_as::<_, Measurement>(&sql)
+        .bind(input.unix_timestamp_from)
+        .bind(input.unix_timestamp_to)
+        .bind(sensor_id)
+        .bind(location_id)
+        .fetch_all(&mut **db)
+        .await;
+
+    match result {
+        Ok(measurements) => Ok(Json(measurements)),
+        Err(_) => Err(Status::InternalServerError),
     }
 }
 
