@@ -32,7 +32,14 @@ fn rocket() -> _ {
         .mount("/", FileServer::from("./frontend"))
         .mount(
             "/api/v0",
-            routes![get_data, put_location, put_sensor, put_data],
+            routes![
+                get_data,
+                get_locations,
+                get_sensors,
+                put_location,
+                put_sensor,
+                put_data
+            ],
         )
 }
 
@@ -85,6 +92,15 @@ async fn put_location(
         .map_err(|_| Status::InternalServerError)
 }
 
+#[get("/locations")]
+async fn get_locations(mut db: Connection<EnvServerDb>) -> Result<Json<Vec<String>>, Status> {
+    sqlx::query_scalar::<_, String>(SELECT_ALL_LOCATIONS)
+        .fetch_all(&mut **db)
+        .await
+        .map(|locations| Json(locations))
+        .map_err(|_| Status::InternalServerError)
+}
+
 /// Input data passed to queries dealing with sensors.
 #[derive(Deserialize)]
 #[serde(crate = "rocket::serde")]
@@ -103,6 +119,15 @@ async fn put_sensor(
         .execute(&mut **db)
         .await
         .map(|_| "Ok".to_string())
+        .map_err(|_| Status::InternalServerError)
+}
+
+#[get("/sensors")]
+async fn get_sensors(mut db: Connection<EnvServerDb>) -> Result<Json<Vec<String>>, Status> {
+    sqlx::query_scalar::<_, String>(SELECT_ALL_SENSORS)
+        .fetch_all(&mut **db)
+        .await
+        .map(|sensors| Json(sensors))
         .map_err(|_| Status::InternalServerError)
 }
 

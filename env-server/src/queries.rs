@@ -10,6 +10,9 @@ pub const INSERT_DATA_SQL: &str =
 pub const ID_FROM_LOCATION_SQL: &str = "SELECT id FROM locations WHERE name = ?;";
 pub const ID_FROM_SENSOR_SQL: &str = "SELECT id FROM sensors WHERE name = ?;";
 
+pub const SELECT_ALL_LOCATIONS: &str = "SELECT name FROM locations ORDER BY name;";
+pub const SELECT_ALL_SENSORS: &str = "SELECT name FROM sensors ORDER BY name;";
+
 // By using a different timestamp format, we can change the grouping.
 // Technically this will always include a "GROUP BY" clause, but using a full,
 // to-the-second timestamp will have single-line groups, which should be the
