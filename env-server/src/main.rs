@@ -10,6 +10,7 @@ use queries::*;
 extern crate rocket;
 
 use rocket::fairing::AdHoc;
+use rocket::fs::FileServer;
 use rocket::http::Status;
 use rocket::serde::{Deserialize, json::Json};
 use rocket::{Build, Rocket, fairing};
@@ -28,7 +29,7 @@ fn rocket() -> _ {
     rocket::build()
         .attach(EnvServerDb::init())
         .attach(migrations_fairing)
-        .mount("/", routes![index])
+        .mount("/", FileServer::from("./frontend"))
         .mount(
             "/api/v0",
             routes![get_data, put_location, put_sensor, put_data],
@@ -238,18 +239,3 @@ async fn id_from_sensor(db: &mut Connection<EnvServerDb>, sensor: &str) -> Optio
 
     return Some(row.0);
 }
-
-//
-// xxxxxxxxxxxxxxxxxxxxxxxxxx test and temporary stuff xxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-//
-
-#[get("/")]
-fn index() -> &'static str {
-    "Hello, sensory-time-seriesy world!"
-}
-
-// #[get("/test")]
-// async fn test(mut db: Connection<EnvServerDb>) -> Option<String> {
-//     let result: (i32,) = sqlx::query_as("SELECT 1").fetch_one(&mut **db).await.ok()?;
-//     Some(format!("Result: {}", result.0))
-// }
