@@ -5,14 +5,34 @@
   <meta charset="utf-8">
   <title>Simple-Minded Home Environmental Sensors</title>
   <script src="env-server.js"></script>
+  <script src="chart.js"></script>
+  <script src="chartjs-adapter-date-fns.js"></script>
 </head>
 
-<body>
+<body onload="populateUI();">
   <h1>Simple-Minded Home Environmental Sensors</h1>
 
-  <p>So empty for now...</p>
+  <p>
+  <label for="locations">Locations:</label>
+  <select name="locations" id="locations"></select>
 
-  <button onclick="test_api()">Test</button>
+  <label for="sensors">Sensors:</label>
+  <select name="sensors" id="sensors"></select>
+
+  <label for="timeFrom">From:</label>
+  <input type="datetime-local" id="timeFrom" name="timeFrom">
+
+  <label for="timeTo">To:</label>
+  <input type="datetime-local" id="timeTo" name="timeTo">
+  </p>
+
+  <button onclick="addPlot()">Add Plot!</button>
+  <button onclick="clearPlot()">Clear!</button>
+
+  <div style="width: 75%">
+    <canvas id="the-chart"></canvas>
+  </div>
+
 </body>
 
 </html>
