@@ -9,5 +9,8 @@ services:
     build: .
     volumes:
       - env-server-data:/mnt/data
+    ports:
+      - "80:8000"
+
 volumes:
     env-server-data:

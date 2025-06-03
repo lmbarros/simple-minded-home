@@ -1,2 +1,5 @@
 [default.databases.env_server_db]
 url = "./env-server.sqlite"
+
+[production]
+address = "0.0.0.0"
